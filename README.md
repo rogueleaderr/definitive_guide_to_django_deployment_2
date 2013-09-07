@@ -133,77 +133,124 @@ we store configuration either in environment variables or in config
 files which are not tracked by VCS.
 
     echo '
-    \ aws_access_key_id: <YOUR KEY HERE>
-    \ aws_secret_access_key: <YOUR SECRET KEY HERE>
-    \ region: '<YOUR REGION HERE, e.g. us-east-1>'
-    \ key_name: hello_world_key
-    \ key_dir: "~/.ec2"
-    \ group_name: hello_world_group
-    \ ssh_port: 22' > aws.cfg
+    aws_access_key_id: <YOUR KEY HERE>
+    aws_secret_access_key: <YOUR SECRET KEY HERE>
+    region: "<YOUR REGION HERE, e.g. us-east-1>"
+    key_name: hello_world_key
+    key_dir: "~/.ec2"
+    group_name: hello_world_group
+    ssh_port: 22
+    ubuntu_lts_ami: "ami-d0f89fb9"' > aws.cfg
     echo "aws.cfg" >> .gitignore
-
-
-Amazon just released an
-integrated commandline tool that makes it easy to administer all of
-their services, so we're going to use that to launch our servers.
-
-
-Now install the AWS CLI:
-
-    pip install awscli
-
-(You can install all our Python packages in a 
-you're worried about keeping your system Python pristine.)
-
-The CLI spits back output as JSON, which is hard to parse from the
-commandline. So we'll use a program called "jq" for output parsing.
-
-    brew install jq
-
-See [JQ download page](http://stedolan.github.io/jq/download/) if you're not on
-Mac or [the Homebrew page](http://brew.sh/) if you don't have Homebrew installed.
-
-Enable AWS command TAB autocomplete:
-
-    # if using zsh
-    echo "source aws_zsh_completer.sh" >> ~/.zshrc
-    exec $SHELL
-    # if using bash
-    complete -C aws_completer aws
-
-Create a ssh keypair to access your servers
-
-    #make a dir to store keys
-    mkdir ~/.ec2
-    #make a key and save contents to a key file
-    aws ec2 create-key-pair --key-name hello_world | grep -oe '--.*--' > ~/.ec2/hello_world.pem
-
-Create a security group to set access rules to your servers:
-
-    aws ec2 create-security-group --group-name hello_world_group --description "security group"
-    # allow ssh traffic from any host
-    aws ec2 authorize-security-group-ingress --group-name hello_world_group --protocol tcp --port 22 --cidr 0.0.0.0/0
-
-
-###Launch EC2 Servers
-
-We're going to launch 2 Ubuntu 12.04 servers
-
-aws ec2 run-instances --image-id ami-d0f89fb9 --count 2 --instance-type t1.micro --key-name ~/.ec2/hello_world.pem --security-groups hello_world_group
 
 (An "AMI" is an Amazon Machine Image, and the one we've chosen corresponds to a
 "free-tier" eligible Ubuntu image.)
 
+While we're at it, let's create a config file that will let you use
+the AWS CLI directly:
+
+    mkdir ~/.aws
+    echo '
+    aws_access_key_id = <YOUR KEY HERE>
+    aws_secret_access_key = <YOUR SECRET KEY HERE>
+    region = <YOUR REGION HERE, e.g. us-east-1>' > ~/.aws/config
 
 
+Now we're going to use a Fabric directive to setup our AWS account[2](#cred_2) by
 
-The servers are:
+1. Configuring a keypair ssh key that will let us log in to our servers
+2. Setup a security group that defines access rules to our servers
 
+To use fab directives, go to the directory where our fabfile lives and
+do
 
-This diagram describes how the key services for the app are spread over the servers:
+    fab setup_aws_account
+
+###Launch EC2 Servers
+
+We're going to launch 2 Ubuntu 12.04 LTS servers, one for our web host
+and one for our database. We're using Ubuntu because it it seems to be
+the most popular linux distro right now, and 12.04 because it's a (L)ong (T)erm (S)upport
+version, meaning we have the longest period before it's official
+deprecated and we're forced to deal with an OS upgrade.
+
+With boto and Fabric, launching a new instance is very easy:
+
+    fab create_server:webserver
+    fab create_server:database
+
+These commands tell Fabric to use boto to create a new "micro"
+(i.e. free for the first year) instance on EC2, with the name you
+provide. You can also provide a lot more configuration options to this
+directive at the command line, but the defaults are sensible for now.
+
+You'll also be given the option to add the instance information to
+your ~/.ssh/config file so that you can login to your instance
+directly with
+
+    ssh webserver
+
+If you create an instance by mistake, you can terminate it with
+
+    fab terminate_instance webserver
+
+(You'll have to manually delete the ssh/config entry)
 
 
 ##<a id="services"></a>Install and Configure Your Services
+
+###Understand the services
+Our app is made up of a number of services that run
+semi-independently:
+
+**Gunicorn**: Our
+  [WSGI](http://wsgi.readthedocs.org/en/latest/what.html)[3](#cred_3)
+  webserver. Gunicorn receives HTTP requests from the world, executes
+  our Django code to produce a response, and returns the response. See
+  
+
+**Nginx**: Our
+  "[reverse proxy](http://en.wikipedia.org/wiki/Reverse_proxy)"
+  server. Nginx takes requests from the open internet and decides
+  whether they should be passed to Gunicorn, served a static file,
+  served a "Gunicorn is down" error page, or even blocked (e.g. DDoS
+  requests.)
+
+**Memcached**: A simple in-memory key/value caching system. Can save
+  Gunicorn a lot of effort regenerating rarely-changed pages.
+
+**Celery**:   An async task system for Python. Can take longer running
+  bits of code and process them outside of Gunicorn without jamming up
+  the webserver. Can also be used for budget concurrency.
+
+**RabbitMQ**: A queue/message broker that passes asynchronous tasks
+  between Gunicorn and Celery.
+
+**Supervisor**: A process manager that attempts to make sure that all key services stay
+  alive and are automatically restarted if they die for any reason.
+
+**Postgres**: The main database server ("cluster" in Postgres
+  parlance"). Contains one or more "logical" databases containing our
+  application data / model data.
+  
+###Install the services
+
+We could install and configure each service individually, but instead
+we're going to use a "configuration automation" tool called
+[Chef](http://www.opscode.com/chef/). Chef lets us write simple Ruby
+programs (sorry Python lovers!) called Cookbooks that automatically
+install and configure services.
+
+Chef can be a bit intimidating. It provides an entire Ruby-based
+domain specific language (DSL) for expressing configuration. And it
+also provides a whole system (Chef server) for controlling the
+configuration of remote nodes from a central location. The DSL is
+unavoidable, but we can make things a bit simpler by using "Chef Solo"
+which is does away with the whole central server and leaves us with
+just a single script that we run on server to bootstrap our
+configuration.
+
+
 
 ##<a id="code"></a>Deploy Your Code
 
@@ -211,24 +258,6 @@ This diagram describes how the key services for the app are spread over the serv
 
 ##Go Hard
 
-**Gunicorn**: The main webserver program that executes LinerNotes' Django code.
-
-**Celery**:   An async task system for Python. Also used for ghetto concurrency.
-
-**Supervisor**: A process manager that attempts to make sure that all key services stay
-  alive and are automatically restarted if they die for any reason.
-  
-**Nginx**: The proxy server. Routes incoming HTTP traffic to Gunicorn (or if Gunicorn is
-  down, to an error page.)
-  
-**RabbitMQ**: A queue/message broker that handles asynchronous tasks created through Celery
-  
-**Memcached**: A simple in-memory key/value caching system.
-
-**Postgres**: The main database server. Has three "logical" databases containing
-  different types of data.
-  
-**ElaticSearch**: The search server. Communicates with webserver through REST interface.
 
 By far the most likely problem you might face is that one of the services has died for
 some silly reason and failed to automatically restart.
@@ -601,4 +630,16 @@ EC2 servers are down.)
 
 You can [look at it here]()
 
+##Bibliography
+[Randall Degges rants on deployment](http://www.rdegges.com/deploying-django/)
+
+[Rob Golding on deploying Django](http://www.robgolding.com/blog/2011/11/12/django-in-production-part-1---the-stack/)
+
+[Aqiliq on deploying Django on Docker](http://agiliq.com/blog/2013/06/deploying-django-using-docker/)
+
 [1]<a href id="cred_1"></a> Hat tip to Martha Kelly for [her post on using Fabric/Boto to deploy EC2](http://marthakelly.github.io/blog/2012/08/09/creating-an-ec2-instance-with-fabric-slash-boto/)
+
+[2]<a href id="cred_2"></a> Hat tip to garnaat for
+[his AWS recipe to setup an account with boto](https://github.com/garnaat/paws/blob/master/ec2_launch_instance.py)
+
+[3][More about WSGI](http://agiliq.com/blog/2013/07/basics-wsgi/)

@@ -8,3 +8,4 @@ django_deployment_env/*
 *~
 *#
 aws.cfg
+fab_hosts/*

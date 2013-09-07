@@ -3,19 +3,19 @@ from tempfile import mkdtemp
 from contextlib import contextmanager
 
 from fabric.operations import put
-from fabric.api import env, local, sudo, run, cd, prefix, task, settings
+from fabric.api import env, local, sudo, run, cd, prefix, task, settings, execute
 from fabric.colors import green as _green, yellow as _yellow
 import boto
 import boto.ec2
 from config import Config
 import time
 
+# import configuration variables from untracked config file
 f = open("aws.cfg")
 cfg = Config(f)
-print cfg
-for k in ("aws_access_key_id", "aws_secret_access_key", "region", "key_name", "group_name", "ssh_port", "key_dir"):
+for k in ("aws_access_key_id", "aws_secret_access_key", "region", "key_name",
+    "group_name", "ssh_port", "key_dir", "ubuntu_lts_ami"):
     globals()[k] = cfg.get(k)
-    print(k, globals()[k])
 
 env.roledefs = {
     'staging_prep': ['root@staging.example.com']
@@ -25,12 +25,8 @@ env.roledefs = {
 STAGING_HOST = 'staging.example.com'
 CHEF_VERSION = '10.20.0'
 
-env.root_dir = '/opt/example/apps/example'
-env.venvs = '/opt/example/venvs'
-env.virtualenv = '%s/example' % env.venvs
-env.activate = 'source %s/bin/activate ' % env.virtualenv
-env.code_dir = '%s/src' % env.root_dir
-env.media_dir = '%s/media' % env.root_dir
+
+env.key_filename = os.path.expanduser(os.path.join(key_dir, key_name + ".pem"))
 
 
 @contextmanager
@@ -107,24 +103,83 @@ def setup_aws_account():
             print 'Security Group: %s already authorized' % group_name
         else:
             raise
+@task
+def create_instance(name, ami=ubuntu_lts_ami,
+                    instance_type='t1.micro',
+                    key_name='hello_world_key',
+                    key_extension='.pem',
+                    key_dir='~/.ec2',
+                    group_name='hello_world_group',
+                    ssh_port=22,
+                    cidr='0.0.0.0/0',
+                    tag=None,
+                    user_data=None,
+                    cmd_shell=True,
+                    login_user='ubuntu',
+                    ssh_passwd=None):
+    """
+    Launch an instance and wait for it to start running.
+    Returns a tuple consisting of the Instance object and the CmdShell
+    object, if request, or None.
 
-def create_server():
+    ami        The ID of the Amazon Machine Image that this instance will
+               be based on.  Default is a 64-bit Amazon Linux EBS image.
+
+    instance_type The type of the instance.
+
+    key_name   The name of the SSH Key used for logging into the instance.
+               It will be created if it does not exist.
+
+    key_extension The file extension for SSH private key files.
+
+    key_dir    The path to the directory containing SSH private keys.
+               This is usually ~/.ssh.
+
+    group_name The name of the security group used to control access
+               to the instance.  It will be created if it does not exist.
+
+    ssh_port   The port number you want to use for SSH access (default 22).
+
+    cidr       The CIDR block used to limit access to your instance.
+
+    tag        A name that will be used to tag the instance so we can
+               easily find it later.
+
+    user_data  Data that will be passed to the newly started
+               instance at launch and will be accessible via
+               the metadata service running at http://169.254.169.254.
+
+    cmd_shell  If true, a boto CmdShell object will be created and returned.
+               This allows programmatic SSH access to the new instance.
+
+    login_user The user name used when SSH'ing into new instance.  The
+               default is 'ec2-user'
+
+    ssh_passwd The password for your SSH key if it is encrypted with a
+               passphrase.
     """
-    Creates EC2 Instance
-    """
-    print(_green("Started..."))
+
+    print(_green("Started creating {}...".format(name)))
     print(_yellow("...Creating EC2 instance..."))
 
     conn = connect_to_ec2()
 
-    image = conn.get_all_images(ec2_amis)
+    try:
+        key = conn.get_all_key_pairs(keynames=[key_name])[0]
+        group = conn.get_all_security_groups(groupnames=[group_name])[0]
+    except conn.ResponseError, e:
+        setup_aws_account()
 
-    reservation = image[0].run(1, 1, key_name=ec2_key_pair, security_groups=ec2_security,
-        instance_type=ec2_instancetype)
+    reservation = conn.run_instances(ami,
+        key_name=key_name,
+        security_groups=[group_name],
+        instance_type=instance_type)
 
     instance = reservation.instances[0]
-    conn.create_tags([instance.id], {"Name":config['INSTANCE_NAME_TAG']})
-    while instance.state == u'pending':
+    conn.create_tags([instance.id], {"Name":name})
+    if tag:
+        instance.add_tag(tag)
+    while instance.state != u'running':
         print(_yellow("Instance state: %s" % instance.state))
         time.sleep(10)
         instance.update()
@@ -132,7 +187,49 @@ def create_server():
     print(_green("Instance state: %s" % instance.state))
     print(_green("Public dns: %s" % instance.public_dns_name))
 
+    if raw_input("Add to ssh/config? (y/n) ").lower() == "y":
+        ssh_slug = """
+        Host {name}
+        HostName {dns}
+        Port 22
+        User ubuntu
+        IdentityFile {key_file_path}
+        ForwardAgent yes
+        """.format(name=name, dns=instance.public_dns_name, key_file_path=os.path.join(os.path.expanduser(key_dir),
+            key_name + key_extension))
+
+        ssh_config = open(os.path.expanduser("~/.ssh/config"), "a")
+        ssh_config.write("\n{}\n".format(ssh_slug))
+        ssh_config.close()
+
+    f = open("fab_hosts/database.txt", "w")
+    f.write(instance.public_dns_name)
+    f.close()
     return instance.public_dns_name
+
+@task
+def terminate_instance(name):
+    """
+    Terminates all servers with the given name
+    """
+
+    print(_green("Started terminating {}...".format(name)))
+
+    conn = connect_to_ec2()
+    filters = {"tag:Name": name}
+    for reservation in conn.get_all_instances(filters=filters):
+        for instance in reservation.instances:
+            if "terminated" in str(instance._state):
+                print "instance {} is already terminated".format(instance.id)
+                continue
+            else:
+                print instance._state
+            print (instance.id, instance.tags['Name'])
+            if raw_input("terminate? (y/n) ").lower() == "y":
+                print(_yellow("Terminating {}".format(instance.id)))
+                conn.terminate_instances(instance_ids=[instance.id])
+                print(_yellow("Terminated"))
+
 
 @task
 def install_chef(latest=True):
@@ -146,9 +243,6 @@ def install_chef(latest=True):
         sudo('gem install chef --no-ri --no-rdoc', pty=True)
     else:
         sudo('gem install chef --no-ri --no-rdoc --version {0}'.format(CHEF_VERSION), pty=True)
-
-    sudo('gem uninstall --no-all --no-executables --no-ignore-dependencies json')
-    sudo('gem install json --version 1.7.6')
 
 
 def parse_ssh_config(text):
@@ -205,17 +299,12 @@ def up():
 
 
 @task
-def bootstrap():
-    set_env_for_user('vagrant')
-
-    # Bootstrap
-    run('test -e %s || ln -s /vagrant/src %s' % (env.code_dir, env.code_dir))
-    with cd(env.code_dir):
-        with _virtualenv():
-            run('pip install -r requirements.txt')
-            _manage_py('syncdb --noinput')
-            _manage_py('migrate')
-            _manage_py('createsuperuser')
+def bootstrap(name):
+    if name == "database":
+        f = open("fab_hosts/database.txt")
+        env.host_string = "ubuntu@{}".format(f.readline().strip())
+        print env.hosts
+        install_chef()
 
 @task
 def hello():
