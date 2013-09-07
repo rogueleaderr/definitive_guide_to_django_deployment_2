@@ -4,7 +4,18 @@ from contextlib import contextmanager
 
 from fabric.operations import put
 from fabric.api import env, local, sudo, run, cd, prefix, task, settings
+from fabric.colors import green as _green, yellow as _yellow
+import boto
+import boto.ec2
+from config import Config
+import time
 
+f = open("aws.cfg")
+cfg = Config(f)
+print cfg
+for k in ("aws_access_key_id", "aws_secret_access_key", "region", "key_name", "group_name", "ssh_port", "key_dir"):
+    globals()[k] = cfg.get(k)
+    print(k, globals()[k])
 
 env.roledefs = {
     'staging_prep': ['root@staging.example.com']
@@ -32,6 +43,96 @@ def _manage_py(command):
     run('python manage.py %s --settings=example.settings_server'
             % command)
 
+def connect_to_ec2():
+    """
+    return a connection given credentials imported from config
+    """
+    return boto.ec2.connect_to_region(region,
+    aws_access_key_id=aws_access_key_id,
+    aws_secret_access_key=aws_secret_access_key)
+
+@task
+def setup_aws_account():
+
+    ec2 = connect_to_ec2()
+
+    # Check to see if specified keypair already exists.
+    # If we get an InvalidKeyPair.NotFound error back from EC2,
+    # it means that it doesn't exist and we need to create it.
+    try:
+        key = ec2.get_all_key_pairs(keynames=[key_name])[0]
+        print "key name {} already exists".format("key_name")
+    except ec2.ResponseError, e:
+        if e.code == 'InvalidKeyPair.NotFound':
+            print 'Creating keypair: %s' % key_name
+            # Create an SSH key to use when logging into instances.
+            key = ec2.create_key_pair(key_name)
+
+            # Make sure the specified key_dir actually exists.
+            # If not, create it.
+            global key_dir
+            key_dir = os.path.expanduser(key_dir)
+            key_dir = os.path.expandvars(key_dir)
+            if not os.path.isdir(key_dir):
+                os.mkdir(key_dir, 0700)
+
+            # AWS will store the public key but the private key is
+            # generated and returned and needs to be stored locally.
+            # The save method will also chmod the file to protect
+            # your private key.
+            key.save(key_dir)
+        else:
+            raise
+
+    # Check to see if specified security group already exists.
+    # If we get an InvalidGroup.NotFound error back from EC2,
+    # it means that it doesn't exist and we need to create it.
+    try:
+        group = ec2.get_all_security_groups(groupnames=[group_name])[0]
+    except ec2.ResponseError, e:
+        if e.code == 'InvalidGroup.NotFound':
+            print 'Creating Security Group: %s' % group_name
+            # Create a security group to control access to instance via SSH.
+            group = ec2.create_security_group(group_name,
+                                              'A group that allows SSH access')
+        else:
+            raise
+
+    # Add a rule to the security group to authorize SSH traffic
+    # on the specified port.
+    try:
+        group.authorize('tcp', ssh_port, ssh_port, "0.0.0.0/0")
+    except ec2.ResponseError, e:
+        if e.code == 'InvalidPermission.Duplicate':
+            print 'Security Group: %s already authorized' % group_name
+        else:
+            raise
+
+def create_server():
+    """
+    Creates EC2 Instance
+    """
+    print(_green("Started..."))
+    print(_yellow("...Creating EC2 instance..."))
+
+    conn = connect_to_ec2()
+
+    image = conn.get_all_images(ec2_amis)
+
+    reservation = image[0].run(1, 1, key_name=ec2_key_pair, security_groups=ec2_security,
+        instance_type=ec2_instancetype)
+
+    instance = reservation.instances[0]
+    conn.create_tags([instance.id], {"Name":config['INSTANCE_NAME_TAG']})
+    while instance.state == u'pending':
+        print(_yellow("Instance state: %s" % instance.state))
+        time.sleep(10)
+        instance.update()
+
+    print(_green("Instance state: %s" % instance.state))
+    print(_green("Public dns: %s" % instance.public_dns_name))
+
+    return instance.public_dns_name
 
 @task
 def install_chef(latest=True):
@@ -116,6 +217,12 @@ def bootstrap():
             _manage_py('migrate')
             _manage_py('createsuperuser')
 
+@task
+def hello():
+    print("Hello world!")
+    a = local("echo hello").stdout
+    print "zoinks"
+    print a
 
 @task
 def push():

@@ -1,7 +1,5 @@
-Django in Production
-===
-The Definitely Definitive Guide
----
+#Django in Production - The Definitely Definitive Guide
+
 
 ### Consulting call to action
 
@@ -31,6 +29,11 @@ guides to parts of Django deployment but haven't found any single,
 recently updated resource that lays out the **simple, Pythonic way of
 deploying a Django site in production**.
 
+The goal of this post is to give you an actual production-ready
+deployment setup, not to introduce you to basic DevOps concepts. I'll
+try to be gentle but won't simplify where doing so would hurt the
+quality of the ultimate deployment.
+
 I'm definitely not the most qualified person to write this post, but
 it looks like I'm the only one dumb enough to try. If you've got
 suggestions about how any part of this process could be better,
@@ -46,19 +49,153 @@ Of course, this is going to be the most well-implemented, stable, and scalable
 "hello world" application on the whole world wide web. Here's a diagram of how
 your final architecture will look:
 
-![Architecture Diagram](https://raw.github.com/rogueleaderr/LinerNotes-site/master/LinerNotes/documentation/architecture_diagram.png?login=rogueleaderr&token=b453c4566dca05e61e5f10f22136d2c2)
+![Architecture Diagram](https://raw.github.com/rogueleaderr/definitive_guide_to_django_deployment/master/django_deployment_diagram.png)
 
-##Set Up the "Physical" Servers
+Basically, users send HTTP requests to your webserver, which are intercepted and
+routed by the nginx webserver. Requests for dynamic content will be routed to
+your WSGI server (Gunicorn) and requests for static content will be served
+directly off the file system. Gunicorn has a few helpers, memcached and celery,
+which respectively offer a cache for repetitive tasks and an asynchronous queue
+for long-running tasks.
 
+We've also got our Postgres database (for all your lovely models) which we run on a
+separate EC2 server. You *can* run Postgres on the same VM, but putting it on a
+separate box will avoid resource contention and make your app more scalable.
+
+See [below](#services) for a more detailed describe of what each component
+actually does.
+
+This article will walk you through the following steps:
+
+1. [Setting up a host server for your webserver and your database](#servers).
+2. [Installing and configuring the services your site will need](#services).
+3. [Automating deployment of your code](#code).
+4. [Setting up monitoring so your site doesn't explode](#monitoring).
+
+##<a id="servers"></a>Set Up the "Physical" Servers
+
+###Set up AWS/EC2
 Since this guide is trying to get you to an actual publicly accessible site,
 we're going to go ahead and build our site on an Amazon Elastic Compute Cloud
-(EC2) "micro" instance (which is essentially free). Alternatively, you can use
-[Vagrant](http://www.vagrantup.com/) to create a VM on your local computer.
+(EC2) "micro" instance (which is essentially free). If you don't want to use
+EC2, you can set up a local virtual machine on your laptop using 
+[Vagrant](http://www.vagrantup.com/). I'm also intrigued by the
+[Docker project](https://www.docker.io/) that claims to allow deployment of
+whole application components in platform agnostic "containers." But Docker
+itself says it's not stable enough for production, and who am I to
+disagree. (But *you* should really consider writing a guide to deploying Django
+using Docker.)
+
+Anyway, we're going to use EC2 to set up the smallest possible host for our webserver and another
+one for our database.
 
 For this tutorial, you'll need an existing EC2 account. There are [many tutorials on setting up an account](http://docs.aws.amazon.com/AWSEC2/latest/UserGuide/get-set-up-for-amazon-ec2.html) so I'm not going to walk you through it.
 
-Amazon just released an integrated commandline tool that makes it easy to
-administer all of their services, so we're going to use that to launch our servers.
+Python has a very nice library called [boto](https://github.com/boto/boto) for administering AWS
+from within code. And another nice tool called [Fabric](http://docs.fabfile.org/en/1.7/) for creating
+command-line directives that execute Python code that can execute
+shell commands on local or remote servers. We're going to use Fabric
+to definite all of our administrative operations, from
+creating/bootstrapping servers up to pushing code.
+
+Start off by cloning this github repo onto your local machine.
+
+    git clone git@github.com:rogueleaderr/definitive_guide_to_django_deployment.git
+    cd definitive_guide_to_django_deployment
+
+I'm assuming that if you want to deploy Django, you already have
+Python and pip and [virtualenv](http://www.virtualenv.org/en/latest/)
+on your laptop. But just to check:
+
+    python --version
+    pip --version
+    virtualenv --version
+
+This process requires a number of Python dependencies which we'll
+install into a virtualenv (but won't track wtih git)
+
+    virtualenv django_deployment_env
+    source django_deployment_env/bin/activate
+    # install all our neccesary dependencies from a requirements file
+    pip install -r requirements.txt
+    # or, for educational purposes, individually
+    pip install boto
+    pip install fabric
+    pip install awscli
+
+The github repo includes a fabfile.py[1](#cred_1) which provides all the
+commandline directives we'll need. But fabfiles are pretty intuitive
+to read, so try to follow along with what each command is doing.
+
+First, we need to set up AWS credentials for boto to use. In keeping
+with the principles of the [Twelve Factor App](http://12factor.net/)
+we store configuration either in environment variables or in config
+files which are not tracked by VCS.
+
+    echo '
+    \ aws_access_key_id: <YOUR KEY HERE>
+    \ aws_secret_access_key: <YOUR SECRET KEY HERE>
+    \ region: '<YOUR REGION HERE, e.g. us-east-1>'
+    \ key_name: hello_world_key
+    \ key_dir: "~/.ec2"
+    \ group_name: hello_world_group
+    \ ssh_port: 22' > aws.cfg
+    echo "aws.cfg" >> .gitignore
+
+
+Amazon just released an
+integrated commandline tool that makes it easy to administer all of
+their services, so we're going to use that to launch our servers.
+
+
+Now install the AWS CLI:
+
+    pip install awscli
+
+(You can install all our Python packages in a 
+you're worried about keeping your system Python pristine.)
+
+The CLI spits back output as JSON, which is hard to parse from the
+commandline. So we'll use a program called "jq" for output parsing.
+
+    brew install jq
+
+See [JQ download page](http://stedolan.github.io/jq/download/) if you're not on
+Mac or [the Homebrew page](http://brew.sh/) if you don't have Homebrew installed.
+
+Enable AWS command TAB autocomplete:
+
+    # if using zsh
+    echo "source aws_zsh_completer.sh" >> ~/.zshrc
+    exec $SHELL
+    # if using bash
+    complete -C aws_completer aws
+
+Create a ssh keypair to access your servers
+
+    #make a dir to store keys
+    mkdir ~/.ec2
+    #make a key and save contents to a key file
+    aws ec2 create-key-pair --key-name hello_world | grep -oe '--.*--' > ~/.ec2/hello_world.pem
+
+Create a security group to set access rules to your servers:
+
+    aws ec2 create-security-group --group-name hello_world_group --description "security group"
+    # allow ssh traffic from any host
+    aws ec2 authorize-security-group-ingress --group-name hello_world_group --protocol tcp --port 22 --cidr 0.0.0.0/0
+
+
+###Launch EC2 Servers
+
+We're going to launch 2 Ubuntu 12.04 servers
+
+aws ec2 run-instances --image-id ami-d0f89fb9 --count 2 --instance-type t1.micro --key-name ~/.ec2/hello_world.pem --security-groups hello_world_group
+
+(An "AMI" is an Amazon Machine Image, and the one we've chosen corresponds to a
+"free-tier" eligible Ubuntu image.)
+
+
+
 
 The servers are:
 
@@ -66,11 +203,11 @@ The servers are:
 This diagram describes how the key services for the app are spread over the servers:
 
 
-##Install and Configure Your Services
+##<a id="services"></a>Install and Configure Your Services
 
-##Deploy Your Code
+##<a id="code"></a>Deploy Your Code
 
-##Set Up Monitoring
+##<a id="monitoring"></a>Set Up Monitoring
 
 ##Go Hard
 
@@ -463,3 +600,5 @@ alert if there's no CPU activity from the webserver or the database (probably me
 EC2 servers are down.)
 
 You can [look at it here]()
+
+[1]<a href id="cred_1"></a> Hat tip to Martha Kelly for [her post on using Fabric/Boto to deploy EC2](http://marthakelly.github.io/blog/2012/08/09/creating-an-ec2-instance-with-fabric-slash-boto/)
