@@ -473,20 +473,20 @@ def sync_config():
     TODO: Use rsync to avoid blowing out config. I was having ssh/permission
     issues when I tried
     """
-
+    """
     if raw_input("Chef requires a clean git repo to download new cookbooks. Commit your latest changes now? (y/n)").lower() == "y":
         local("git commit -am 'commiting to allow download of updated cookbooks'")
         node_data = open("chef_files/cookbooks/node.json")
-        print node_data
         data = json.load(node_data)
         node_data.close()
         for pkg in data["run_list"]:
-            local("knife cookbook site install {} -o chef_files/cookbooks".format(pkg))
+            if pkg != "django_deployment":
+                with settings(warn_only=True):
+                    local("knife cookbook site install {} -o chef_files/cookbooks".format(pkg))
+    """
     sudo('mkdir -p /etc/chef')
     upload_project_sudo(local_dir='./chef_files/cookbooks', remote_dir='/etc/chef')
     upload_project_sudo(local_dir='./chef_files/solo.rb', remote_dir='/etc/chef')
-
-
 
 def run_chef():
     print "--SYNCING CHEF CONFIG--"
