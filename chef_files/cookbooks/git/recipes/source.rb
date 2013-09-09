@@ -23,7 +23,8 @@ end
 include_recipe "build-essential"
 
 pkgs = value_for_platform_family(
-  ["rhel"] => %w{ expat-devel gettext-devel libcurl-devel openssl-devel perl-ExtUtils-MakeMaker zlib-devel }
+  ["rhel"] => %w{ expat-devel gettext-devel libcurl-devel openssl-devel perl-ExtUtils-MakeMaker zlib-devel },
+  ["debian"] => %w{ libcurl4-gnutls-dev libexpat1-dev gettext libz-dev libssl-dev }
 )
 
 pkgs.each do |pkg|
@@ -43,6 +44,6 @@ execute "Extracting and Building Git #{node['git']['version']} from Source" do
     (mkdir git-#{node['git']['version']} && tar -zxf git-#{node['git']['version']}.tar.gz -C git-#{node['git']['version']} --strip-components 1)
     (cd git-#{node['git']['version']} && make prefix=#{node['git']['prefix']} install)
   COMMAND
-  creates "node['git']['prefix']}/bin/git"
+  creates "#{node['git']['prefix']}/bin/git"
   not_if "git --version | grep #{node['git']['version']}"
 end
