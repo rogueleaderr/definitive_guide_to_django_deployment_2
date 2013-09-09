@@ -1,5 +1,5 @@
 {
   "run_list": [ "apt", "nginx", "python", "supervisor", "django"],
   "base_packages": ["bash-completion"],
-  "ubuntu_python_packages": ["python-setuptools", "python-pip", "python-dev", "libpq-dev"],
+  "ubuntu_python_packages": ["python-setuptools", "python-pip", "python-dev", "libpq-dev"]
 }
