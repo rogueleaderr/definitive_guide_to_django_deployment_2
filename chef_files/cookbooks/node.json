@@ -1,6 +1,5 @@
 {
-  "run_list": [ "apt", "nginx", "python", "supervisor"]//,
-//  "base_packages": ["bash-completion"],
-//  "ubuntu_python_packages": ["python-setuptools", "python-pip", "python-dev", "libpq-dev"]
-
+  "run_list": [ "apt", "nginx", "python", "supervisor"],
+  "base_packages": ["bash-completion"],
+  "ubuntu_python_packages": ["python-setuptools", "python-pip", "python-dev", "libpq-dev"]
 }

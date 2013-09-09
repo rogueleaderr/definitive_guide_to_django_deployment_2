@@ -1,4 +1,4 @@
-import os
+import os, json
 from tempfile import mkdtemp
 from contextlib import contextmanager
 
@@ -218,7 +218,7 @@ def terminate_instance(name):
 @task
 def install_chef(latest=True):
     """
-    Install chef-solo on the server
+    Install chef-solo on the server.
     """
     sudo('apt-get update', pty=True)
     sudo('apt-get install -y git-core rubygems ruby ruby-dev', pty=True)
@@ -465,19 +465,27 @@ def upload_project_sudo(local_dir=None, remote_dir=""):
 
 def sync_config():
     """
+    Download the latest versions of the chef cookbooks that we're going to need.
+
     Make sure the chef config directory exists, then upload cookbooks and the
     solo.rb file that tells chef where to look for cookbooks.
 
     TODO: Use rsync to avoid blowing out config. I was having ssh/permission
     issues when I tried
     """
+
+    if raw_input("Chef requires a clean git repo to download new cookbooks. Commit your latest changes now? (y/n)").lower() == "y":
+        local("git commit -am 'commiting to allow download of updated cookbooks'")
+        node_data = open("chef_files/cookbooks/node.json")
+        print node_data
+        data = json.load(node_data)
+        node_data.close()
+        for pkg in data["run_list"]:
+            local("knife cookbook site install {} -o chef_files/cookbooks".format(pkg))
     sudo('mkdir -p /etc/chef')
     upload_project_sudo(local_dir='./chef_files/cookbooks', remote_dir='/etc/chef')
     upload_project_sudo(local_dir='./chef_files/solo.rb', remote_dir='/etc/chef')
 
-    with settings(warn_only=True):
-        with hide('everything'):
-            test_cookbook_dir = run('test -d /etc/chef/cookbooks')
 
 
 def run_chef():
