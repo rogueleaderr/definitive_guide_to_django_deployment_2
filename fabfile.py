@@ -477,7 +477,6 @@ def sync_config():
     if raw_input("Chef requires a clean git repo to download new cookbooks. Commit your latest changes now? (y/n)").lower() == "y":
         local("git commit -am 'commiting to allow download of updated cookbooks'")
         node_data = open("chef_files/cookbooks/node.json")
-        print node_data
         data = json.load(node_data)
         node_data.close()
         for pkg in data["run_list"]:
