@@ -1,18 +1,25 @@
+name              "nginx"
 maintainer        "Opscode, Inc."
 maintainer_email  "cookbooks@opscode.com"
 license           "Apache 2.0"
 description       "Installs and configures nginx"
-version           "0.99.0"
+version           "1.8.0"
 
 recipe "nginx", "Installs nginx package and sets up configuration with Debian apache style with sites-enabled/sites-available"
 recipe "nginx::source", "Installs nginx from source and sets up configuration with Debian apache style with sites-enabled/sites-available"
 
-%w{ ubuntu debian centos redhat fedora }.each do |os|
+%w{ ubuntu debian centos redhat amazon scientific oracle fedora }.each do |os|
   supports os
 end
 
-%w{ build-essential runit }.each do |cb|
+%w{ build-essential yum apt runit }.each do |cb|
   depends cb
+end
+
+depends 'ohai', '>= 1.1.4'
+
+%w{ bluepill }.each do |cb|
+  suggests cb
 end
 
 attribute "nginx/dir",
@@ -59,7 +66,7 @@ attribute "nginx/gzip_types",
   :display_name => "Nginx Gzip Types",
   :description => "Supported MIME-types for gzip",
   :type => "array",
-  :default => [ "text/plain", "text/html", "text/css", "application/x-javascript", "text/xml", "application/xml", "application/xml+rss", "text/javascript" ]
+  :default => [ "text/plain", "text/css", "application/x-javascript", "text/xml", "application/xml", "application/xml+rss", "text/javascript", "application/javascript", "application/json" ]
 
 attribute "nginx/keepalive",
   :display_name => "Nginx Keepalive",
@@ -84,3 +91,23 @@ attribute "nginx/server_names_hash_bucket_size",
   :display_name => "Nginx Server Names Hash Bucket Size",
   :default => "64"
 
+attribute "nginx/types_hash_max_size",
+  :display_name => "Nginx Types Hash Max Size",
+  :default => "2048"
+
+attribute "nginx/types_hash_bucket_size",
+  :display_name => "Nginx Types Hash Bucket Size",
+  :default => "64"
+
+attribute "nginx/disable_access_log",
+  :display_name => "Disable Access Log",
+  :default => "false"
+
+attribute "nginx/default_site_enabled",
+  :display_name => "Default site enabled",
+  :default => "true"
+
+attribute "nginx/sendfile",
+  :display_name => "Nginx sendfile",
+  :description => "Whether to enable sendfile",
+  :default => "on"

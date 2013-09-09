@@ -3,7 +3,7 @@
 # Recipe:: default
 # Author:: AJ Christensen <aj@junglist.gen.nz>
 #
-# Copyright 2008-2009, Opscode, Inc.
+# Copyright 2008-2012, Opscode, Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -18,39 +18,35 @@
 # limitations under the License.
 #
 
-package "nginx"
+include_recipe 'nginx::ohai_plugin'
 
-directory node[:nginx][:log_dir] do
-  mode 0755
-  owner node[:nginx][:user]
-  action :create
-end
-
-%w{nxensite nxdissite}.each do |nxscript|
-  template "/usr/sbin/#{nxscript}" do
-    source "#{nxscript}.erb"
-    mode 0755
-    owner "root"
-    group "root"
+case node['nginx']['install_method']
+when 'source'
+  include_recipe 'nginx::source'
+when 'package'
+  case node['platform']
+  when 'redhat','centos','scientific','amazon','oracle'
+    if node['nginx']['repo_source'] == 'epel'
+      include_recipe 'yum::epel'
+    elsif node['nginx']['repo_source'] == 'nginx'
+      include_recipe 'nginx::repo'
+    elsif node['nginx']['repo_source'].nil?
+      log "node['nginx']['repo_source'] was not set, no additional yum repositories will be installed." do
+        level :debug
+      end
+    else
+      raise ArgumentError, "Unknown value '#{node['nginx']['repo_source']}' was passed to the nginx cookbook."
+    end
   end
+  package node['nginx']['package_name']
+  service 'nginx' do
+    supports :status => true, :restart => true, :reload => true
+    action :enable
+  end
+  include_recipe 'nginx::commons'
 end
 
-template "nginx.conf" do
-  path "#{node[:nginx][:dir]}/nginx.conf"
-  source "nginx.conf.erb"
-  owner "root"
-  group "root"
-  mode 0644
-end
-
-template "#{node[:nginx][:dir]}/sites-available/default" do
-  source "default-site.erb"
-  owner "root"
-  group "root"
-  mode 0644
-end
-
-service "nginx" do
+service 'nginx' do
   supports :status => true, :restart => true, :reload => true
-  action [ :enable, :start ]
+  action :start
 end
