@@ -1,0 +1,14 @@
+{
+  "run_list": [ "apt", "build-essential", "git", "nginx", "python", "supervisor", "django"],
+  "base_packages": ["bash-completion"],
+  "ubuntu_python_packages": ["python-setuptools", "python-pip", "python-dev", "libpq-dev"],
+"pip_python_packages": {"virtualenv": "1.5.1", "mercurial": "1.7"},
+
+  "users": {
+    "var-www": {
+      "id": 1001,
+      "full_name": "Webserver User",
+      "groups": ["admin"]
+    }
+  }
+}

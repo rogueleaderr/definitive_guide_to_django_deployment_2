@@ -5,6 +5,7 @@ from contextlib import contextmanager
 from fabric.operations import put
 from fabric.api import env, local, sudo, run, cd, prefix, task, settings, execute
 from fabric.colors import green as _green, yellow as _yellow
+from fabric.context_managers import hide, show
 import boto
 import boto.ec2
 from config import Config
@@ -25,27 +26,10 @@ env.roledefs = {
 STAGING_HOST = 'staging.example.com'
 CHEF_VERSION = '10.20.0'
 
-
 env.key_filename = os.path.expanduser(os.path.join(key_dir, key_name + ".pem"))
 
 
-@contextmanager
-def _virtualenv():
-    with prefix(env.activate):
-        yield
-
-
-def _manage_py(command):
-    run('python manage.py %s --settings=example.settings_server'
-            % command)
-
-def connect_to_ec2():
-    """
-    return a connection given credentials imported from config
-    """
-    return boto.ec2.connect_to_region(region,
-    aws_access_key_id=aws_access_key_id,
-    aws_secret_access_key=aws_secret_access_key)
+#-----FABRIC TASKS-----------
 
 @task
 def setup_aws_account():
@@ -238,43 +222,16 @@ def install_chef(latest=True):
     """
     sudo('apt-get update', pty=True)
     sudo('apt-get install -y git-core rubygems ruby ruby-dev', pty=True)
-
+    sudo('apt-get install rsync', pty=True)
+    sudo('gem install ruby-shadow')
     if latest:
         sudo('gem install chef --no-ri --no-rdoc', pty=True)
     else:
         sudo('gem install chef --no-ri --no-rdoc --version {0}'.format(CHEF_VERSION), pty=True)
 
+    with settings(hide('warnings', 'stdout', 'stderr'), warn_only=True):
+        sudo('mkdir /etc/chef')
 
-def parse_ssh_config(text):
-    """
-    Parse an ssh-config output into a Python dict.
-
-    Because Windows doesn't have grep, lol.
-    """
-    try:
-        lines = text.split('\n')
-        lists = [l.split(' ') for l in lines]
-        lists = [filter(None, l) for l in lists]
-
-        tuples = [(l[0], ''.join(l[1:]).strip().strip('\r')) for l in lists]
-
-        return dict(tuples)
-
-    except IndexError:
-        raise Exception("Malformed input")
-
-
-def set_env_for_user(user='example'):
-    if user == 'vagrant':
-        # set ssh key file for vagrant
-        result = local('vagrant ssh-config', capture=True)
-        data = parse_ssh_config(result)
-
-        try:
-            env.host_string = 'vagrant@127.0.0.1:%s' % data['Port']
-            env.key_filename = data['IdentityFile'].strip('"')
-        except KeyError:
-            raise Exception("Missing data from ssh-config")
 
 
 @task
@@ -304,7 +261,8 @@ def bootstrap(name):
         f = open("fab_hosts/database.txt")
         env.host_string = "ubuntu@{}".format(f.readline().strip())
         print env.hosts
-        install_chef()
+        #install_chef()
+        run_chef()
 
 @task
 def hello():
@@ -405,9 +363,83 @@ def staging(username):
     env.host_string = '%s@%s:%s' % (username, env.host, env.port)
 
 
+
+@task
+def provision():
+    """
+    Run chef-solo
+    """
+    sync_config()
+
+    node_name = "node_%s.json" % (env.roles[0].split('_')[0])
+
+    with cd('/etc/chef/cookbooks'):
+        sudo('chef-solo -c /etc/chef/cookbooks/solo.rb -j /etc/chef/cookbooks/%s' % node_name, pty=True)
+
+
+@task
+def prepare():
+    install_chef(latest=False)
+    provision()
+
+
+#----------HELPER FUNCTIONS-----------
+
+@contextmanager
+def _virtualenv():
+    with prefix(env.activate):
+        yield
+
+
+def _manage_py(command):
+    run('python manage.py %s --settings=example.settings_server'
+            % command)
+
+def connect_to_ec2():
+    """
+    return a connection given credentials imported from config
+    """
+    return boto.ec2.connect_to_region(region,
+    aws_access_key_id=aws_access_key_id,
+    aws_secret_access_key=aws_secret_access_key)
+
+
+def parse_ssh_config(text):
+    """
+    Parse an ssh-config output into a Python dict.
+
+    Because Windows doesn't have grep, lol.
+    """
+    try:
+        lines = text.split('\n')
+        lists = [l.split(' ') for l in lines]
+        lists = [filter(None, l) for l in lists]
+
+        tuples = [(l[0], ''.join(l[1:]).strip().strip('\r')) for l in lists]
+
+        return dict(tuples)
+
+    except IndexError:
+        raise Exception("Malformed input")
+
+
+def set_env_for_user(user='example'):
+    if user == 'vagrant':
+        # set ssh key file for vagrant
+        result = local('vagrant ssh-config', capture=True)
+        data = parse_ssh_config(result)
+
+        try:
+            env.host_string = 'vagrant@127.0.0.1:%s' % data['Port']
+            env.key_filename = data['IdentityFile'].strip('"')
+        except KeyError:
+            raise Exception("Missing data from ssh-config")
+
+
 def upload_project_sudo(local_dir=None, remote_dir=""):
     """
-    Copied from Fabric and updated to use sudo.
+    Tars and compresses files on local host and transfers
+    them to remote host at specified location
     """
     local_dir = local_dir or os.getcwd()
 
@@ -431,28 +463,26 @@ def upload_project_sudo(local_dir=None, remote_dir=""):
     finally:
         local("rm -rf %s" % tmp_folder)
 
-
-@task
 def sync_config():
+    """
+    Make sure the chef config directory exists, then upload cookbooks and the
+    solo.rb file that tells chef where to look for cookbooks.
+
+    TODO: Use rsync to avoid blowing out config. I was having ssh/permission
+    issues when I tried
+    """
     sudo('mkdir -p /etc/chef')
-    upload_project_sudo(local_dir='./cookbooks', remote_dir='/etc/chef')
-    upload_project_sudo(local_dir='./roles/', remote_dir='/etc/chef')
+    upload_project_sudo(local_dir='./chef_files/cookbooks', remote_dir='/etc/chef')
+    upload_project_sudo(local_dir='./chef_files/solo.rb', remote_dir='/etc/chef')
+
+    with settings(warn_only=True):
+        with hide('everything'):
+            test_cookbook_dir = run('test -d /etc/chef/cookbooks')
 
 
-@task
-def provision():
-    """
-    Run chef-solo
-    """
+def run_chef():
+    print "--SYNCING CHEF CONFIG--"
     sync_config()
-
-    node_name = "node_%s.json" % (env.roles[0].split('_')[0])
-
-    with cd('/etc/chef/cookbooks'):
-        sudo('chef-solo -c /etc/chef/cookbooks/solo.rb -j /etc/chef/cookbooks/%s' % node_name, pty=True)
-
-
-@task
-def prepare():
-    install_chef(latest=False)
-    provision()
+    print "--RUNNING CHEF--"
+    chef_executable = sudo('which chef-solo')
+    sudo('cd /etc/chef && %s' % chef_executable, pty=True)
