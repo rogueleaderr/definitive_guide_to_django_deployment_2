@@ -485,9 +485,10 @@ def sync_config():
                     local("knife cookbook site install {} -o chef_files/cookbooks".format(pkg))
     """
     sudo('mkdir -p /etc/chef')
+    # TODO glob this
     upload_project_sudo(local_dir='./chef_files/cookbooks', remote_dir='/etc/chef')
     upload_project_sudo(local_dir='./chef_files/site-cookbooks', remote_dir='/etc/chef')
-    upload_project_sudo(local_dir='./chef_files/solo.rb', remote_dir='/etc/chef')
+    upload_project_sudo(local_dir='./chef_files/solo_webserver.rb', remote_dir='/etc/chef')
     upload_project_sudo(local_dir='./chef_files/roles', remote_dir='/etc/chef')
 
 def run_chef():
@@ -495,4 +496,4 @@ def run_chef():
     sync_config()
     print "--RUNNING CHEF--"
     chef_executable = sudo('which chef-solo')
-    sudo('cd /etc/chef && sudo %s' % chef_executable, pty=True)
+    sudo('cd /etc/chef && sudo %s -c /etc/chef/solo_webserver.rb' % chef_executable, pty=True)

@@ -25,6 +25,8 @@ run_list "recipe[git]",
 	"recipe[nginx]",
 	"recipe[python]",
 	"recipe[nginx]",
+	"recipe[rabbitmq]",
+	"recipe[postgresql::client]",
 	"recipe[application]",
 	"recipe[application_python]",
 	"recipe[django_deployment]"

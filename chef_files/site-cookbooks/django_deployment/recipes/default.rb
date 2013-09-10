@@ -104,14 +104,14 @@ application "#{app_name}" do
     celerybeat true
     celerycam true
     broker do
-      transport "redis"
+      transport "rabbitmq"
     end
   end
 
   nginx_load_balancer do
     only_if { node['roles'].include? '#{app_name}_load_balancer' }
     application_port 8080
-    static_files "/site_media" => "site_media"
+    static_files "/static" => "static"
   end
 
 end
