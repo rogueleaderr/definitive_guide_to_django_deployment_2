@@ -1,0 +1,9 @@
+{
+  "name": "django_deployment",
+  "maintainer_email": "4.business.email@gmail.com",
+  "license": "MIT",
+  "maintainer": "YOUR_COMPANY_NAME",
+  "long_description": "= DESCRIPTION:\nForthcoming!\n= REQUIREMENTS:\n\n= ATTRIBUTES:\n\n= USAGE:\n\n",
+  "version": "0.0.1",
+  "description": "Installs/Configures Django"
+}

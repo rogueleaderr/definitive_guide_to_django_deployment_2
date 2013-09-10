@@ -486,6 +486,7 @@ def sync_config():
     """
     sudo('mkdir -p /etc/chef')
     upload_project_sudo(local_dir='./chef_files/cookbooks', remote_dir='/etc/chef')
+    upload_project_sudo(local_dir='./chef_files/site-cookbooks', remote_dir='/etc/chef')
     upload_project_sudo(local_dir='./chef_files/solo.rb', remote_dir='/etc/chef')
     upload_project_sudo(local_dir='./chef_files/roles', remote_dir='/etc/chef')
 
@@ -494,4 +495,4 @@ def run_chef():
     sync_config()
     print "--RUNNING CHEF--"
     chef_executable = sudo('which chef-solo')
-    sudo('cd /etc/chef && %s' % chef_executable, pty=True)
+    sudo('cd /etc/chef && sudo %s' % chef_executable, pty=True)
