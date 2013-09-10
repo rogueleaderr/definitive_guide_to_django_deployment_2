@@ -40,8 +40,10 @@ end
 =end
 
 # make sure python and git are installed, because we'll need them
-include_recipe 'python'
-include_recipe 'git'
+depends 'python'
+depends 'git'
+depends "application"
+depends "application_python"
 
 node.base_packages.each do |pkg|
     package pkg do
@@ -66,6 +68,55 @@ node.pip_python_packages.each do |pkg|
         not_if "[ `pip freeze | grep #{pkg} ]"
     end
 end
+
+application "#{app_name}" do
+  path "/srv/#{app_name}"
+  owner "nobody"
+  group "nogroup"
+  repository "https://github.com/#{repo}.git"
+  revision "master"
+  migrate true
+
+  django do
+    requirements "requirements/requirements.txt"
+    settings_template "settings.py.erb"
+    debug true
+    collectstatic "build_static --noinput"
+    database do
+      database "#{app_name}"
+      engine "postgresql_psycopg2"
+      username "#{app_name}"
+      password "#{database_password}"
+    end
+    database_master_role "#{app_name}_database_master"
+  end
+
+  gunicorn do
+    only_if { node['roles'].include? '#{app_name}_application_server' }
+    app_module :django
+    port 8080
+  end
+
+  celery do
+    only_if { node['roles'].include? '#{app_name}_application_server' }
+    config "celery_settings.py"
+    django true
+    celerybeat true
+    celerycam true
+    broker do
+      transport "redis"
+    end
+  end
+
+  nginx_load_balancer do
+    only_if { node['roles'].include? '#{app_name}_load_balancer' }
+    application_port 8080
+    static_files "/site_media" => "site_media"
+  end
+
+end
+
+=begin
 
 # Create the project folder, create a virtualenv
 # clone the project repo, install requirements
