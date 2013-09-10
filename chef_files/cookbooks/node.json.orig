@@ -1,0 +1,10 @@
+{
+<<<<<<< HEAD
+  "run_list": [ "apt", "nginx", "python", "supervisor", "django"],
+=======
+  "run_list": [ "django_deployment" ],//, "apt", "nginx", "python", "supervisor", ],
+>>>>>>> chef-vendor-supervisor
+  "base_packages": ["bash-completion"],
+  "ubuntu_python_packages": ["python-setuptools", "python-pip", "python-dev", "libpq-dev"],
+  "pip_python_packages": ["virtualenv"]
+}

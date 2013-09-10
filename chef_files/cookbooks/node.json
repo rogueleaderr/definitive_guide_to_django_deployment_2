@@ -1,6 +1,3 @@
 {
-  "run_list": [ "django_deployment" ],//, "apt", "nginx", "python", "supervisor", ],
-  "base_packages": ["bash-completion"],
-  "ubuntu_python_packages": ["python-setuptools", "python-pip", "python-dev", "libpq-dev"],
-  "pip_python_packages": ["virtualenv"]
+  "run_list": ["role[web]"]
 }

@@ -487,6 +487,7 @@ def sync_config():
     sudo('mkdir -p /etc/chef')
     upload_project_sudo(local_dir='./chef_files/cookbooks', remote_dir='/etc/chef')
     upload_project_sudo(local_dir='./chef_files/solo.rb', remote_dir='/etc/chef')
+    upload_project_sudo(local_dir='./chef_files/roles', remote_dir='/etc/chef')
 
 def run_chef():
     print "--SYNCING CHEF CONFIG--"
