@@ -7,7 +7,7 @@ name "web"
 
 
 default_attributes("site_domain" => "yourawsmdomain.ly",
-                   "env_root" => "/home/ubuntu/sites/",
+                   "project_root" => "/home/ubuntu/sites",
                    "app_name" =>"hello_world",
                    "repo" => "zmsmith/djangohelloworld",
                     "settings" => "__init__.py",
@@ -19,13 +19,14 @@ default_attributes("site_domain" => "yourawsmdomain.ly",
                     "pip_python_packages" => "virtualenv"
                     )
 
-run_list "recipe[git]",
+run_list "recipe[django_deployment]",
+	"recipe[git]",
 	"recipe[apt]",
 	"recipe[nginx]",
 	"recipe[python]",
 	"recipe[python]",
-	"recipe[nginx]",
-	"recipe[django_deployment]"
+	"recipe[nginx]"
+
 
 
 

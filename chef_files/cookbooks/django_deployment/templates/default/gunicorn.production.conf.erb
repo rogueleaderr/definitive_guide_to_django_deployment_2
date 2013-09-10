@@ -3,7 +3,7 @@ timeout = 360
 worker_class= "gevent"
 name = "<%= @app_name %>_gunicorn"
 
-bind = "unix:/tmp/<%= @app_domain %>.sock"
+bind = "unix:/tmp/<%= @domain %>.sock"
 
 def def_post_fork(server, worker):
     from psycogreen.gevent import patch_psycopg

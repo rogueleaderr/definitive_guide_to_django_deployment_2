@@ -30,13 +30,16 @@
 # Calculate some locations based on set attributes
 
 node.default["env_name"] = "#{node.app_name}-env"
-node.default["project_home"] = "#{node.env_root}/#{node.env_name}"
-node.default["app_home"] = "#{node.project_home}/#{node.app_name}"
+node.default["env_home"] = "#{node.project_root}/#{node.env_name}"
+node.default["app_home"] = "#{node.project_root}/#{node.app_name}"
 
+=begin
 execute "Update apt repos" do
     command "apt-get update"
 end
+=end
 
+# make sure python and git are installed, because we'll need them
 include_recipe 'python'
 include_recipe 'git'
 
@@ -46,6 +49,7 @@ node.base_packages.each do |pkg|
     end
 end
 
+# setup a nice bash shell configuration
 template "/home/ubuntu/.bashrc" do
   source "bashrc.erb"
   mode 0644
@@ -72,8 +76,8 @@ django_deployment_build_repo node.branch do
   settings node.settings
   repo node.repo
   app_name node.app_name
-  env_root node.env_root
-  not_if { File.directory? node.project_home }
+  project_root node.project_root
+  not_if { File.directory? node.app_home }
 end
 
 # Ubuntu distribution supervisor is old, but it starts automatically which is helpful
@@ -88,7 +92,38 @@ execute "supervisor update" do
   action :nothing
 end
 
-# Set up configuration files inside your app repo for supervisor, gunicorn, and nginx
+# Set up restart for nginx
+service 'nginx' do
+  supports :restart => true, :reload => true
+  action :enable
+end
+
+
+# Set up configuration files from templates...
+
+# For gunicorn
+
+template "#{node.app_home}/conf/gunicorn/gunicorn.production.conf" do
+  source "gunicorn.production.conf.erb"
+  owner "root"
+  group "root"
+  variables(
+    :domain => node.site_domain,
+    :app_name => node.app_name)
+end
+
+# Runner script for gunicorn/supervisor
+template "#{node.app_home}/scripts/go_production_gunicorn.sh" do
+  source "go_production_gunicorn.sh.erb"
+  owner "root"
+  group "root"
+  variables(
+    :domain => node.site_domain,
+    :project_env => node.env_home,
+    :app_home => node.app_home)
+end
+
+# For supervisor
 
 template "#{node.app_home}/conf/supervisor/#{node.app_name}.conf" do
   source "site_supervisor.conf.erb"
@@ -96,66 +131,38 @@ template "#{node.app_home}/conf/supervisor/#{node.app_name}.conf" do
   group "root"
   variables(
     :domain => node.site_domain,
-    :project_env => node.project_home,
+    :project_env => node.env_home,
     :app_home => node.app_home)
-  notifies :run, resources(:execute => "supervisor update")
 end
 
-template "#{node.app_home}/conf/gunicorn/#{node.app_name}.conf" do
-  source "gunicorn.production.conf.erb"
+# For nginx
+
+template "#{node.app_home}/conf/nginx/#{node.app_name}.conf" do
+  source "nginx-conf.erb"
   owner "root"
   group "root"
   variables(
     :domain => node.site_domain,
-    :project_env => node.project_home,
+    :env_home => node.env_home,
+    :app_name => node.app_name,
     :app_home => node.app_home)
+
+end
+
+# symlink conf files into system locations and restart services
+
+link "/etc/supervisor/conf.d/#{node.app_name}.conf" do
+  to "#{node.app_home}/conf/supervisor/#{node.app_name}.conf"
   notifies :run, resources(:execute => "supervisor update")
 end
 
-template "#{node.app_home}/scripts/go_production_gunicorn.sh" do
-  source "go_production_gunicorn.sh.erb"
-  owner "root"
-  group "root"
-  variables(
-    :domain => node.site_domain,
-    :project_env => node.project_home,
-    :app_home => node.app_home)
-  notifies :run, resources(:execute => "supervisor update")
+link "/etc/nginx/sites-available/#{node.app_name}.conf" do
+  to "#{node.app_home}/conf/nginx/#{node.app_name}.conf"
 end
 
-# Set up nginx sites-enables and retsart on changes
-
-template "/etc/nginx/sites-enabled/default" do
-  source "nginx-default.erb"
-  owner "root"
-  group "root"
-  variables(
-    :domain => node.site_domain,
-    :project_home => node.project_home)
+link "/etc/nginx/sites-enabled/#{node.app_name}.conf" do
+  to "/etc/nginx/sites-available/#{node.app_name}.conf"
   notifies :restart, "service[nginx]"
-end
-
-service 'nginx' do
-  supports :restart => true, :reload => true
-  action :enable
-end
-
-# symlink conf files into system locations
-
-template "/etc/supervisor/conf.d/#{node.app_name}.conf" do end
-
-# Set up gunicorn through supervisor and restart on changes
-
-template "/etc/supervisor/conf.d/gunicorn.conf" do
-  source "gunicorn.conf.erb"
-  owner "root"
-  group "root"
-  variables(
-    :domain => node.site_domain,
-    :project_env => node.project_home,
-    :settings => "#{node.app_home}/settings/__init__.py",
-    :conf => "#{node.app_home}/conf/gunicorn/gunicorn.conf")
-  notifies :run, resources(:execute => "supervisor update")
 end
 
 
