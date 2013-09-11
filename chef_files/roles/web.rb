@@ -28,7 +28,6 @@ run_list "recipe[git]",
 	"recipe[rabbitmq]",
 	"recipe[postgresql::client]",
 	"recipe[application]",
-	"recipe[application_python]",
 	"recipe[django_deployment]"
 
 
