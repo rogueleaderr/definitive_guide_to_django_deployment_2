@@ -11,3 +11,6 @@ aws.cfg
 fab_hosts/*
 *.sublime-workspace
 chef_files/dep_cookbooks/*
+chef_files/cookbooks/*
+chef_files/hold_cookbooks/*
+venv

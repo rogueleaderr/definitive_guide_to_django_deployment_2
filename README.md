@@ -9,12 +9,10 @@ Over the last two years, I've taught myself to program in order to
 build my startup [LinerNotes.com](http://www.linernotes.com). I
 started out expecting that the hardest part would be getting my head
 around the sophisticated algorithmic logic of programming. To my
-surprise, I've actually had
-
-to do very little algorithmic work (Python has existing
+surprise, I've actually had to do very little algorithmic work (Python has existing
 libraries that implement nearly any algorithm better than I could.)
 
-Instead, the hardest part has been getting my proficient at using the
+Instead, the hardest part has been getting proficient at using the
 *many* different tools in the programmer's utility belt. From emacs to
 gunicorn, building a real project requires dozens of different
 tools. Theoretically, one can *a priori* reason through a red-black
@@ -23,7 +21,7 @@ manual. LinerNotes is actually a lot more complicated under the hood
 than it is on the surface, so I've had to read quite a lot of
 manuals. The point of this guide is to save you some of that trouble.
 
-Struggling to write an API builds programming acumen. Struggling to
+Sometimes trouble is good. Struggling to design and implement an API builds programming acumen. Struggling to
 configure nginx is just a waste of time. I've found many partial
 guides to parts of Django deployment but haven't found any single,
 recently updated resource that lays out the **simple, Pythonic way of
@@ -51,10 +49,10 @@ your final architecture will look:
 
 ![Architecture Diagram](https://raw.github.com/rogueleaderr/definitive_guide_to_django_deployment/master/django_deployment_diagram.png)
 
-Basically, users send HTTP requests to your webserver, which are intercepted and
-routed by the nginx webserver. Requests for dynamic content will be routed to
+Basically, users send HTTP requests to your server, which are intercepted and
+routed by the nginx webserver program. Requests for dynamic content will be routed to
 your WSGI server (Gunicorn) and requests for static content will be served
-directly off the file system. Gunicorn has a few helpers, memcached and celery,
+directly off the server's file system. Gunicorn has a few helpers, memcached and celery,
 which respectively offer a cache for repetitive tasks and an asynchronous queue
 for long-running tasks.
 
@@ -75,16 +73,16 @@ This article will walk you through the following steps:
 ##<a id="servers"></a>Set Up the "Physical" Servers
 
 ###Set up AWS/EC2
+
 Since this guide is trying to get you to an actual publicly accessible site,
-we're going to go ahead and build our site on an Amazon Elastic Compute Cloud
-(EC2) "micro" instance (which is essentially free). If you don't want to use
+we're going to go ahead and build our site on the smallest, freest Amazon Elastic Compute Cloud
+(EC2) instance available, the trusty "micro". If you don't want to use
 EC2, you can set up a local virtual machine on your laptop using 
 [Vagrant](http://www.vagrantup.com/). I'm also intrigued by the
 [Docker project](https://www.docker.io/) that claims to allow deployment of
 whole application components in platform agnostic "containers." But Docker
 itself says it's not stable enough for production, and who am I to
-disagree. (But *you* should really consider writing a guide to deploying Django
-using Docker.)
+disagree?[[1]](#note_1)
 
 Anyway, we're going to use EC2 to set up the smallest possible host for our webserver and another
 one for our database.
@@ -93,12 +91,12 @@ For this tutorial, you'll need an existing EC2 account. There are [many tutorial
 
 Python has a very nice library called [boto](https://github.com/boto/boto) for administering AWS
 from within code. And another nice tool called [Fabric](http://docs.fabfile.org/en/1.7/) for creating
-command-line directives that execute Python code that can execute
+command-line directives that execute Python code that can itself execute
 shell commands on local or remote servers. We're going to use Fabric
 to definite all of our administrative operations, from
-creating/bootstrapping servers up to pushing code.
+creating/bootstrapping servers up to pushing code. I've read that Chef (which we'll use below) also has a [plugin to launch EC2 servers](http://docs.opscode.com/plugin_knife_ec2.html) but I'm going to prefer boto/Fabric because they give us the option of embedding all the bootstrapping logic into Python and editing it directly as needed.
 
-Start off by cloning this github repo onto your local machine.
+Start off by cloning the Github repo for this project onto your local machine.
 
     git clone git@github.com:rogueleaderr/definitive_guide_to_django_deployment.git
     cd definitive_guide_to_django_deployment
@@ -112,7 +110,7 @@ on your laptop. But just to check:
     virtualenv --version
 
 This process requires a number of Python dependencies which we'll
-install into a virtualenv (but won't track wtih git)
+install into a virtualenv (but won't track wtih git):[[2]](#note_2)
 
     virtualenv django_deployment_env
     source django_deployment_env/bin/activate
@@ -123,7 +121,7 @@ install into a virtualenv (but won't track wtih git)
     pip install fabric
     pip install awscli
 
-The github repo includes a fabfile.py[1](#cred_1) which provides all the
+The github repo includes a fabfile.py[[3]](#cred_1) which provides all the
 commandline directives we'll need. But fabfiles are pretty intuitive
 to read, so try to follow along with what each command is doing.
 
@@ -156,12 +154,12 @@ the AWS CLI directly:
     region = <YOUR REGION HERE, e.g. us-east-1>' > ~/.aws/config
 
 
-Now we're going to use a Fabric directive to setup our AWS account[2](#cred_2) by
+Now we're going to use a Fabric directive to setup our AWS account[[4]](#cred_2) by:
 
 1. Configuring a keypair ssh key that will let us log in to our servers
 2. Setup a security group that defines access rules to our servers
 
-To use fab directives, go to the directory where our fabfile lives and
+To use our first fabric directive and setup our AWS account, go to the directory where our fabfile lives and
 do
 
     fab setup_aws_account
@@ -182,7 +180,7 @@ With boto and Fabric, launching a new instance is very easy:
 These commands tell Fabric to use boto to create a new "micro"
 (i.e. free for the first year) instance on EC2, with the name you
 provide. You can also provide a lot more configuration options to this
-directive at the command line, but the defaults are sensible for now.
+directive at the command line but the defaults are sensible for now.
 
 You'll also be given the option to add the instance information to
 your ~/.ssh/config file so that you can login to your instance
@@ -204,24 +202,23 @@ Our app is made up of a number of services that run
 semi-independently:
 
 **Gunicorn**: Our
-  [WSGI](http://wsgi.readthedocs.org/en/latest/what.html)[3](#cred_3)
-  webserver. Gunicorn receives HTTP requests from the world, executes
-  our Django code to produce a response, and returns the response. See
+  [WSGI](http://wsgi.readthedocs.org/en/latest/what.html)[[5]](#cred_3)
+  webserver. Gunicorn receives HTTP requests fowarded to it from nginx, executes
+  our Django code to produce a response, and returns the response which nginx transmits back to the client.
   
-
 **Nginx**: Our
   "[reverse proxy](http://en.wikipedia.org/wiki/Reverse_proxy)"
   server. Nginx takes requests from the open internet and decides
   whether they should be passed to Gunicorn, served a static file,
-  served a "Gunicorn is down" error page, or even blocked (e.g. DDoS
+  served a "Gunicorn is down" error page, or even blocked (e.g. to prevent denial-of-service
   requests.)
 
 **Memcached**: A simple in-memory key/value caching system. Can save
-  Gunicorn a lot of effort regenerating rarely-changed pages.
+  Gunicorn a lot of effort regenerating rarely-changed pages or objects.
 
 **Celery**:   An async task system for Python. Can take longer running
   bits of code and process them outside of Gunicorn without jamming up
-  the webserver. Can also be used for budget concurrency.
+  the webserver. Can also be used for "poor man's" concurrency in Django.
 
 **RabbitMQ**: A queue/message broker that passes asynchronous tasks
   between Gunicorn and Celery.
@@ -238,18 +235,52 @@ semi-independently:
 We could install and configure each service individually, but instead
 we're going to use a "configuration automation" tool called
 [Chef](http://www.opscode.com/chef/). Chef lets us write simple Ruby
-programs (sorry Python lovers!) called Cookbooks that automatically
+programs (sorry Python monogamists!) called Cookbooks that automatically
 install and configure services.
 
 Chef can be a bit intimidating. It provides an entire Ruby-based
 domain specific language (DSL) for expressing configuration. And it
 also provides a whole system (Chef server) for controlling the
-configuration of remote nodes from a central location. The DSL is
+configuration of remote servers (a.k.a. "nodes") from a central location. The DSL is
 unavoidable, but we can make things a bit simpler by using "Chef Solo"
 which is does away with the whole central server and leaves us with
-just a single script that we run on server to bootstrap our
+just a single script that we run on our remote servers to bootstrap our
 configuration.
 
+Hat tip to several authors for blog posts about using Chef for Django[[6]](#cred_4)
+
+Make sure we have the latest version of the approriate cookbooks:
+
+knife cookbook site install git -o cookbooks
+
+Copy your user public key into the node.json user key slot
+
+cat ~/.ssh/id_rsa.pub | pbcopy
+
+
+Install Ruby:
+
+    #brew install rbenv
+    echo 'export PATH="$HOME/.rbenv/bin:$PATH"' >> ~/.zshrc
+    echo 'eval "$(rbenv init -)"' >> ~/.zshrc
+    rbenv install 1.9.3-p448
+    rbenv global 1.9.3-p448
+
+Install [Berkshelf](http://berkshelf.com/) and Chef-Rewind:
+
+    gem install bundler
+    sudo gem install berkshelf
+    # tell Berkshelf to install cookbooks into our folder instead of ~/.berkshelf
+    export BERKSHELF_PATH=chef_files
+
+Use Berkshelf to install the cookbooks we'll need:
+
+    berks install
+
+
+    
+
+http://berkshelf.com/
 
 
 ##<a id="code"></a>Deploy Your Code
@@ -477,49 +508,6 @@ Images can be [seen on this page](https://console.aws.amazon.com/ec2/v2/home?reg
 If you have to recreate a server, make sure you reattach the old *Elastic IP* or the app won't
 know where to find resources. See [here for directions on ElasticIP's](http://docs.aws.amazon.com/AmazonVPC/latest/GettingStartedGuide/EIP.html)
 
-Using the Amazon AWS Console
------
-
-Amazon provides a service called *IAM* that lets me create individual user accounts to log
-into my AWS account with specifically controlled permissions. I have created an account
-for you that lets you control my AWS resources with full permissions (except for billing /
-editing permissions).
-
-* Your username is "Carter_S"
-* Your password can be found in [this file](https://www.dropbox.com/s/u7mrcch6wruc938/carter-aws-password.csv).
-* Your API credentials (which you probably won't need)
-[are here](https://www.dropbox.com/s/b0siokvfqlotmaa/carter_aws_credentials.csv).
-
-If you need to login to AWS, use this link:
-[https://linernotes.signin.aws.amazon.com/console](https://linernotes.signin.aws.amazon.com/console)
-
-(You should only ever need to login to my AWS console if shit has *really* hit the fan.)
-
-From the AWS console, you can access the EC2 tab that lets you control the virtual
-servers, launch new servers from images, or [attach Elastic IP's](https://console.aws.amazon.com/ec2/home?region=us-east-1#s=Addresses).
-
-You can also access [the S3 tab](https://console.aws.amazon.com/s3/home?region=us-east-1#) that lets you manipulate any my stored static files if
-anything goes wrong with those. (More below).
-
-The Code Base
----------
-
-All of the website code lives
-[on Github in my repo](https://github.com/rogueleaderr/hello-site).
-
-I added you as a collaborator so you can pull/push as needed. I **very much** hope you
-will not need to modify any code (if it comes to that, try to notify me at burning man and
-I'll see if I can go back to Reno and do it myself.) But in an emergency, you can set up a
-development environment most easily by creating a clone of the hello webserver from
-the image and SSH'ing into it. You'll need to upload your SSH key, but there is a script
-in the repo that will push any committed changes to the live production server:
-
-    /var/www/hello-env/hello/hello/scripts/git_to_prod.sh
-
-Supervisor should make sure that gunicorn and celery are running, so if you make code
-changes you can just reset them as above and your changes will show up. You'll be able to
-access the site live in a browser by visiting the "public DNS" for the server you start in AWS.
-
 Static Files
 -----------
 
@@ -630,6 +618,9 @@ EC2 servers are down.)
 
 You can [look at it here]()
 
+
+US PG BOUNCER
+
 ##Bibliography
 [Randall Degges rants on deployment](http://www.rdegges.com/deploying-django/)
 
@@ -642,4 +633,16 @@ You can [look at it here]()
 [2]<a href id="cred_2"></a> Hat tip to garnaat for
 [his AWS recipe to setup an account with boto](https://github.com/garnaat/paws/blob/master/ec2_launch_instance.py)
 
-[3][More about WSGI](http://agiliq.com/blog/2013/07/basics-wsgi/)
+[3] [More about WSGI](http://agiliq.com/blog/2013/07/basics-wsgi/)
+
+[4] ["Building a Django App Server with Chef, Eric Holscher"](http://ericholscher.com/blog/2010/nov/8/building-django-app-server-chef/); ["An Experiment With Chef Solo", jamiecurle]("https://github.com/jamiecurle/ubuntu-django-chef-solo-config");
+
+##Notes
+[1]<a href id="note_1"></a> (But *you* should really consider writing a guide to deploying Django
+using Docker so I can link to it.)
+
+[2]<a href id="note_2"></a>For development I enjoy [VirtualenvWrapper](http://virtualenvwrapper.readthedocs.org/en/latest/) which makes switching between venv's easy. But it installs venvs by default in a ~/Envs home directory and for deployment we want to keep as much as possible inside of one main project directory (to make everything easy to find.)
+
+add net.core.somaxconn=1024 to /etc/sysctl.conf
+
+cache-machine
