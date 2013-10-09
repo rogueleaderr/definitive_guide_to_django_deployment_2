@@ -5,7 +5,7 @@ from contextlib import contextmanager
 from fabric.operations import put
 from fabric.api import env, local, sudo, run, cd, prefix, task, settings, execute
 from fabric.colors import green as _green, yellow as _yellow
-from fabric.context_managers import hide, show
+from fabric.context_managers import hide, show, lcd
 import boto
 import boto.ec2
 from config import Config
@@ -220,6 +220,9 @@ def install_chef(latest=True):
     """
     Install chef-solo on the server.
     """
+    local("knife solo prepare -i {key_file} {host}".format(key_file=env.key_filename,
+                                                           host=env.host_string))
+    """
     sudo('apt-get update', pty=True)
     sudo('apt-get install -y git-core rubygems ruby ruby-dev', pty=True)
     sudo('apt-get install rsync', pty=True)
@@ -231,7 +234,7 @@ def install_chef(latest=True):
 
     with settings(hide('warnings', 'stdout', 'stderr'), warn_only=True):
         sudo('mkdir /etc/chef')
-
+    """
 
 
 @task
@@ -484,8 +487,6 @@ def sync_config():
                 with settings(warn_only=True):
                     local("knife cookbook site install {} -o chef_files/cookbooks".format(pkg))
     """
-    local("knife solo prepare -i {key_file} {host}".format(key_file=env.key_filename,
-                                                           host=env.host_string))
     """
     sudo('mkdir -p /etc/chef')
     # TODO glob this
@@ -503,8 +504,9 @@ def run_chef(name):
     print "--SYNCING CHEF CONFIG--"
     sync_config()
     print "--RUNNING CHEF--"
-    node = "./chef_files/nodes/{name}_node.json".format(name=name)
-    local("knife solo cook -i {key_file} {host} {node}".format(key_file=env.key_filename,
+    node = "./nodes/{name}_node.json".format(name=name)
+    with lcd('chef_files'):
+        local("knife solo cook -i {key_file} {host} {node}".format(key_file=env.key_filename,
                                                            host=env.host_string,
                                                            node=node))
 

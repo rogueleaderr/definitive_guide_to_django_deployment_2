@@ -93,10 +93,6 @@ application "#{node.app_name}" do
 	revision "master"
 	migrate true
 
-    link "/srv/#{node.app_name}" do
-      to "/srv/#{node.app_name}"
-    end
-
 	django do
 		requirements "requirements/requirements.txt"
 		settings_template "settings.py.erb"
