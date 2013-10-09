@@ -262,7 +262,7 @@ def bootstrap(name):
         env.host_string = "ubuntu@{}".format(f.readline().strip())
         print env.hosts
         #install_chef()
-        run_chef()
+        run_chef(name)
 
 @task
 def hello():
@@ -484,16 +484,29 @@ def sync_config():
                 with settings(warn_only=True):
                     local("knife cookbook site install {} -o chef_files/cookbooks".format(pkg))
     """
+    local("knife solo prepare -i {key_file} {host}".format(key_file=env.key_filename,
+                                                           host=env.host_string))
+    """
     sudo('mkdir -p /etc/chef')
     # TODO glob this
-    upload_project_sudo(local_dir='./chef_files/cookbooks', remote_dir='/etc/chef')
-    upload_project_sudo(local_dir='./chef_files/site-cookbooks', remote_dir='/etc/chef')
-    upload_project_sudo(local_dir='./chef_files/solo_webserver.rb', remote_dir='/etc/chef')
-    upload_project_sudo(local_dir='./chef_files/roles', remote_dir='/etc/chef')
+    remote_chef_dir = '/etc/chef' 
+    upload_project_sudo(local_dir='./chef_files/cookbooks', remote_dir=remote_chef_dir)
+    upload_project_sudo(local_dir='./chef_files/site-cookbooks', remote_dir=remote_chef_dir)
+    upload_project_sudo(local_dir='./chef_files/json_attribs', remote_dir=remote_chef_dir)
+    upload_project_sudo(local_dir='./chef_files/solo_webserver.rb', remote_dir=remote_chef_dir)
+    upload_project_sudo(local_dir='./chef_files/roles', remote_dir=remote_chef_dir)
+    # TODO do via databags
+    upload_project_sudo(local_dir='./project.settings', remote_dir=remote_chef_dir)
+    """
 
-def run_chef():
+def run_chef(name):
     print "--SYNCING CHEF CONFIG--"
     sync_config()
     print "--RUNNING CHEF--"
-    chef_executable = sudo('which chef-solo')
-    sudo('cd /etc/chef && sudo %s -c /etc/chef/solo_webserver.rb' % chef_executable, pty=True)
+    node = "./chef_files/nodes/{name}_node.json".format(name=name)
+    local("knife solo cook -i {key_file} {host} {node}".format(key_file=env.key_filename,
+                                                           host=env.host_string,
+                                                           node=node))
+
+    #chef_executable = sudo('which chef-solo')
+    #sudo('cd /etc/chef && sudo %s -c /etc/chef/solo_webserver.rb' % chef_executable, pty=True)

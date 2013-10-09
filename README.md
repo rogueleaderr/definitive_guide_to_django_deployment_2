@@ -277,6 +277,47 @@ Use Berkshelf to install the cookbooks we'll need:
 
     berks install
 
+Now we're going to use Fabric to tell Chef to bootstrap our webserver. Do:
+
+    fab bootstrap:database
+
+This will:
+
+1. Install Chef
+2. Tell Chef to configure the server
+
+Okay, buckle up. We're going to need to talk a little about how Chef works. But it'll be worth it.
+
+At the root, Chef is made up of small Ruby scripts called *recipes* that express
+configuration. Chef *declares* configuration rather than executing a
+series of steps (like Fabric does), i.e. a recipe is supposed to describe all the resources that
+are available on a server (rather than just invoking installation
+commands.) If a resource is missing when a recipe is run, Chef will
+try to figure out how to install that resource. But recipes are
+(supposed to be) *idempotent*, meaning that if you run a recipe and
+then run it again then the second run will have no effects.
+
+But which recipes to run? Chef organizes recipes into *cookbooks* that
+group together recipes for working with a specific tool (e.g. "the git
+cookbook"). And Chef has a concept called "roles" that let you specify
+which cookbooks should be used on a given server. So for example, we
+can define a "webserver" role and tell Chef to use the "git", "nginx"
+and "django" cookbooks. Opscode (the makers of Chef) provide a bunch
+of pre-packaged and (usually well maintained) cookbooks for common
+tools like git. These are what we installed with Berkshelf (above).
+
+Chef cookbooks can get quite complicated, but they are just code and so they can be version controlled with git. Chef mavens recommend storing as much configuration as possible in cookbooks (instead of in roles) because it's easier to test or rollback changes to a cookbook. **WHY?**
+
+We have one role for the webserver:
+
+    cat chef_files/roles/web.rb
+
+And we invoke Chef-solo with a tiny Ruby script that tells Chef where to find our cookbooks and roles:
+
+    cat chef_files/solo_webserver.rb
+
+
+
 
     
 
@@ -627,6 +668,11 @@ US PG BOUNCER
 [Rob Golding on deploying Django](http://www.robgolding.com/blog/2011/11/12/django-in-production-part-1---the-stack/)
 
 [Aqiliq on deploying Django on Docker](http://agiliq.com/blog/2013/06/deploying-django-using-docker/)
+
+[Kate Heddleston's Talk on Chef at Pycon 2013](http://pyvideo.org/video/1756/chef-automating-web-application-infrastructure)
+
+[Honza's django-chef repo](https://github.com/honza/django-chef)
+
 
 [1]<a href id="cred_1"></a> Hat tip to Martha Kelly for [her post on using Fabric/Boto to deploy EC2](http://marthakelly.github.io/blog/2012/08/09/creating-an-ec2-instance-with-fabric-slash-boto/)
 

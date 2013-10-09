@@ -28,7 +28,7 @@ run_list "recipe[git]",
 	"recipe[rabbitmq]",
 	"recipe[postgresql::client]",
 	"recipe[application]",
-	"recipe[django_deployment]"
+	#"recipe[django_deployment]"
 
 
 

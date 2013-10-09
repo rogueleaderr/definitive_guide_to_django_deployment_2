@@ -14,3 +14,6 @@ chef_files/dep_cookbooks/*
 chef_files/cookbooks/*
 chef_files/hold_cookbooks/*
 venv
+hold_chef_files/*
+*.lock
+.#*

@@ -39,7 +39,7 @@ node.default["env_name"] = "#{node.app_name}-env"
 node.default["env_home"] = "#{node.project_root}/#{node.env_name}"
 node.default["app_home"] = "#{node.project_root}/#{node.app_name}"
 
-# a ridiculously roundable way of getting the node variable into the block
+# a ridiculously roundabout way of getting the node variable into the block
 db_line = <<HERE
 			database  "#{node.app_name}"
 			engine  "postgresql_psycopg2"
@@ -56,13 +56,14 @@ puts "DEFF #{node[:database]}"
 execute "Update apt repos" do
     command "apt-get update"
 end
-=end
+
 
 node.base_packages.each do |pkg|
     package pkg do
         :upgrade
     end
 end
+
 
 # setup a nice bash shell configuration
 template "/home/ubuntu/.bashrc" do
@@ -81,6 +82,7 @@ node.pip_python_packages.each do |pkg|
         not_if "[ `pip freeze | grep #{pkg} ]"
     end
 end
+=end
 
 application "#{node.app_name}" do
 	only_if { node['roles'].include? 'application_server' }
@@ -90,6 +92,10 @@ application "#{node.app_name}" do
 	repository "https://github.com/#{node.repo}.git"
 	revision "master"
 	migrate true
+
+    link "/srv/#{node.app_name}" do
+      to "/srv/#{node.app_name}"
+    end
 
 	django do
 		requirements "requirements/requirements.txt"
@@ -135,3 +141,4 @@ application "#{node.app_name}" do
 	end
 
 end
+
