@@ -186,7 +186,7 @@ def create_instance(name, ami=ubuntu_lts_ami,
         ssh_config.write("\n{}\n".format(ssh_slug))
         ssh_config.close()
 
-    f = open("fab_hosts/database.txt", "w")
+    f = open("fab_hosts/{}.txt".format(name), "w")
     f.write(instance.public_dns_name)
     f.close()
     return instance.public_dns_name
@@ -260,12 +260,11 @@ def up():
 
 @task
 def bootstrap(name):
-    if name == "database":
-        f = open("fab_hosts/database.txt")
-        env.host_string = "ubuntu@{}".format(f.readline().strip())
-        print env.hosts
-        #install_chef()
-        run_chef(name)
+    f = open("fab_hosts/{}.txt".format(name))
+    env.host_string = "ubuntu@{}".format(f.readline().strip())
+    print env.hosts
+    install_chef()
+    run_chef(name)
 
 @task
 def hello():
@@ -490,7 +489,7 @@ def sync_config():
     """
     sudo('mkdir -p /etc/chef')
     # TODO glob this
-    remote_chef_dir = '/etc/chef' 
+    remote_chef_dir = '/etc/chef'
     upload_project_sudo(local_dir='./chef_files/cookbooks', remote_dir=remote_chef_dir)
     upload_project_sudo(local_dir='./chef_files/site-cookbooks', remote_dir=remote_chef_dir)
     upload_project_sudo(local_dir='./chef_files/json_attribs', remote_dir=remote_chef_dir)
@@ -501,14 +500,11 @@ def sync_config():
     """
 
 def run_chef(name):
-    print "--SYNCING CHEF CONFIG--"
+    print(_yellow("--SYNCING CHEF CONFIG--"))
     sync_config()
-    print "--RUNNING CHEF--"
+    print(_yellow("--RUNNING CHEF--"))
     node = "./nodes/{name}_node.json".format(name=name)
     with lcd('chef_files'):
-        local("knife solo cook -i {key_file} {host} {node}".format(key_file=env.key_filename,
+        local("knife solo cook -i {key_file} {host} {node}".format(keygca_file=env.key_filename,
                                                            host=env.host_string,
                                                            node=node))
-
-    #chef_executable = sudo('which chef-solo')
-    #sudo('cd /etc/chef && sudo %s -c /etc/chef/solo_webserver.rb' % chef_executable, pty=True)

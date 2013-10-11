@@ -87,7 +87,7 @@ disagree?[[1]](#note_1)
 Anyway, we're going to use EC2 to set up the smallest possible host for our webserver and another
 one for our database.
 
-For this tutorial, you'll need an existing EC2 account. There are [many tutorials on setting up an account](http://docs.aws.amazon.com/AWSEC2/latest/UserGuide/get-set-up-for-amazon-ec2.html) so I'm not going to walk you through it.
+For this tutorial, you'll need an existing EC2 account. There are [many tutorials on setting up an account](http://docs.aws.amazon.com/AWSEC2/latest/UserGuide/get-set-up-for-amazon-ec2.html) so I'm not going to walk you through the account setup.
 
 Python has a very nice library called [boto](https://github.com/boto/boto) for administering AWS
 from within code. And another nice tool called [Fabric](http://docs.fabfile.org/en/1.7/) for creating
@@ -125,7 +125,7 @@ The github repo includes a fabfile.py[[3]](#cred_1) which provides all the
 commandline directives we'll need. But fabfiles are pretty intuitive
 to read, so try to follow along with what each command is doing.
 
-First, we need to set up AWS credentials for boto to use. In keeping
+First, we need to set up Amazon Web Services (AWS) credentials for boto to use. In keeping
 with the principles of the [Twelve Factor App](http://12factor.net/)
 we store configuration either in environment variables or in config
 files which are not tracked by VCS.
@@ -145,7 +145,7 @@ files which are not tracked by VCS.
 "free-tier" eligible Ubuntu image.)
 
 While we're at it, let's create a config file that will let you use
-the AWS CLI directly:
+the AWS command line interface (CLI) directly:
 
     mkdir ~/.aws
     echo '
@@ -166,7 +166,7 @@ do
 
 ###Launch EC2 Servers
 
-We're going to launch 2 Ubuntu 12.04 LTS servers, one for our web host
+We're going to launch two Ubuntu 12.04 LTS servers, one for our web host
 and one for our database. We're using Ubuntu because it it seems to be
 the most popular linux distro right now, and 12.04 because it's a (L)ong (T)erm (S)upport
 version, meaning we have the longest period before it's official
@@ -174,8 +174,8 @@ deprecated and we're forced to deal with an OS upgrade.
 
 With boto and Fabric, launching a new instance is very easy:
 
-    fab create_server:webserver
-    fab create_server:database
+    fab create_instance:webserver
+    fab create_instance:database
 
 These commands tell Fabric to use boto to create a new "micro"
 (i.e. free for the first year) instance on EC2, with the name you
@@ -216,7 +216,7 @@ semi-independently:
 **Memcached**: A simple in-memory key/value caching system. Can save
   Gunicorn a lot of effort regenerating rarely-changed pages or objects.
 
-**Celery**:   An async task system for Python. Can take longer running
+**Celery**:   An async task system for Python. Can take longer-running
   bits of code and process them outside of Gunicorn without jamming up
   the webserver. Can also be used for "poor man's" concurrency in Django.
 
@@ -227,7 +227,7 @@ semi-independently:
   alive and are automatically restarted if they die for any reason.
 
 **Postgres**: The main database server ("cluster" in Postgres
-  parlance"). Contains one or more "logical" databases containing our
+  parlance). Contains one or more "logical" databases containing our
   application data / model data.
   
 ###Install the services
@@ -242,47 +242,45 @@ Chef can be a bit intimidating. It provides an entire Ruby-based
 domain specific language (DSL) for expressing configuration. And it
 also provides a whole system (Chef server) for controlling the
 configuration of remote servers (a.k.a. "nodes") from a central location. The DSL is
-unavoidable, but we can make things a bit simpler by using "Chef Solo"
-which is does away with the whole central server and leaves us with
+unavoidable, but we can make things a bit simpler by using "Chef Solo", a stripped down version of Chef that does away with the whole central server and leaves us with
 just a single script that we run on our remote servers to bootstrap our
 configuration.
 
-Hat tip to several authors for blog posts about using Chef for Django[[6]](#cred_4)
+(Hat tip to several authors for blog posts about using Chef for Django[[6]](#cred_4))
 
-Make sure we have the latest version of the approriate cookbooks:
+####Set up Chef
 
-knife cookbook site install git -o cookbooks
+First, install Ruby:
 
-Copy your user public key into the node.json user key slot
-
-cat ~/.ssh/id_rsa.pub | pbcopy
-
-
-Install Ruby:
-
-    #brew install rbenv
-    echo 'export PATH="$HOME/.rbenv/bin:$PATH"' >> ~/.zshrc
-    echo 'eval "$(rbenv init -)"' >> ~/.zshrc
+    #brew install rbenv (the virtualenv equivalent)
+    echo 'export PATH="$HOME/.rbenv/bin:$PATH"' >> ~/.zshrc # or .bashrc
+    echo 'eval "$(rbenv init -)"' >> ~/.zshrc # or .bashrc
     rbenv install 1.9.3-p448
     rbenv global 1.9.3-p448
-
-Install [Berkshelf](http://berkshelf.com/) and Chef-Rewind:
-
+    #install bundler, the pip equivalent
     gem install bundler
-    sudo gem install berkshelf
-    # tell Berkshelf to install cookbooks into our folder instead of ~/.berkshelf
-    export BERKSHELF_PATH=chef_files
+
+Install some tools that simplify working with Chef ([Knife Solo](https://github.com/matschaffer/knife-solo), [Knife Solo Data Bag](https://github.com/thbishop/knife-solo_data_bag), [Berkshelf](http://berkshelf.com/), and [Knife-solo\_data\_bag]https://github.com/thbishop/knife-solo_data_bag):
+
+    # Install all the gems in the file "Gemfile"
+    bundler install
+    # Ruby requires rehashing to use command line options
+    rbenv rehash
 
 Use Berkshelf to install the cookbooks we'll need:
 
+    cd chef_files
+    # tell Berkshelf to install cookbooks into our folder instead of ~/.berkshelf
+    export BERKSHELF_PATH=chef_files
     berks install
+    cd ..
 
 Now we're going to use Fabric to tell Chef to bootstrap our webserver. Do:
 
-    fab bootstrap:database
+    fab bootstrap:webserver
 
 This will:
-
+ruby
 1. Install Chef
 2. Tell Chef to configure the server
 
@@ -308,18 +306,58 @@ tools like git. These are what we installed with Berkshelf (above).
 
 Chef cookbooks can get quite complicated, but they are just code and so they can be version controlled with git. Chef mavens recommend storing as much configuration as possible in cookbooks (instead of in roles) because it's easier to test or rollback changes to a cookbook. **WHY?**
 
-We have one role for the webserver:
+We're going to have two nodes, a webserver and a database so we'll have three roles:
 
-    cat chef_files/roles/web.rb
+1. base.rb (common configuration that both will need, like apt and git)
+2. application_server.rb (webserver configuration)
+3. database.rb (database configuration)
 
-And we invoke Chef-solo with a tiny Ruby script that tells Chef where to find our cookbooks and roles:
+The role definitions live in `chef_files/roles`
 
-    cat chef_files/solo_webserver.rb
+Chef solo needs a config file to run. We're going to put the config in
+`chef_files/solo_webserver.rb`. This config just tells chef solo where
+to find our cookbooks and our roles *and* a bit of additional
+configuration for the node. Our extra config is `chef_files/json_attribs/node_webserver.json`, which tells Chef which roles we want to apply to our node.
+
+Any production Django installation is going to have some sensitive
+values (e.g. database passwords). Chef has a construct called *data
+bags* for isolating and storing sensitive information. And these bags
+can even be encrypted so they can be stored in a version control
+system (VCS). Knife solo lets us create a databag and encrypt
+it. Fabric will automatically upload our databags to the server where
+they'll be accessible to our Chef solo recipe.
+
+First, we need an encryption key (which we will *NOT* store in Github):
+
+    cd chef_files
+    openssl rand -base64 512 > data_bag_key
+    # if you aren't using my repo's .gitingore, add the key
+    cd ..
+    echo "chef_files/data_bag_key" >> .gitignore
+
+Open `settings.json` and set your database password and IP (plus whatever other private settings you might want). It should look something like:
+
+    {
+        "id":"config_1",
+            "POSTGRES_PASS":"awesome_password",
+                "POSTGRES_IP":"localhost",
+                    "DEBUG":"False"
+    }
+
+Now we can use the knife-solo to create an encrypted data bag:
+
+    cd chef_files
+    knife solo data bag create config config_1 --json-file ../settings.json
+    cd ..
+
+
+Make sure to add "staticfiles" to your installed apps.
 
 
 
 
-    
+
+port 80    
 
 http://berkshelf.com/
 
@@ -669,25 +707,27 @@ US PG BOUNCER
 
 [Aqiliq on deploying Django on Docker](http://agiliq.com/blog/2013/06/deploying-django-using-docker/)
 
-[Kate Heddleston's Talk on Chef at Pycon 2013](http://pyvideo.org/video/1756/chef-automating-web-application-infrastructure)
-
-[Honza's django-chef repo](https://github.com/honza/django-chef)
 
 
-[1]<a href id="cred_1"></a> Hat tip to Martha Kelly for [her post on using Fabric/Boto to deploy EC2](http://marthakelly.github.io/blog/2012/08/09/creating-an-ec2-instance-with-fabric-slash-boto/)
 
-[2]<a href id="cred_2"></a> Hat tip to garnaat for
-[his AWS recipe to setup an account with boto](https://github.com/garnaat/paws/blob/master/ec2_launch_instance.py)
 
-[3] [More about WSGI](http://agiliq.com/blog/2013/07/basics-wsgi/)
-
-[4] ["Building a Django App Server with Chef, Eric Holscher"](http://ericholscher.com/blog/2010/nov/8/building-django-app-server-chef/); ["An Experiment With Chef Solo", jamiecurle]("https://github.com/jamiecurle/ubuntu-django-chef-solo-config");
+[How to use Knife-Solo and Knife-Solo_data_bags](http://distinctplace.com/infrastructure/2013/08/04/secure-data-bag-items-with-chef-solo/)
 
 ##Notes
 [1]<a href id="note_1"></a> (But *you* should really consider writing a guide to deploying Django
 using Docker so I can link to it.)
 
 [2]<a href id="note_2"></a>For development I enjoy [VirtualenvWrapper](http://virtualenvwrapper.readthedocs.org/en/latest/) which makes switching between venv's easy. But it installs venvs by default in a ~/Envs home directory and for deployment we want to keep as much as possible inside of one main project directory (to make everything easy to find.)
+
+[3]<a href id="cred_1"></a> Hat tip to Martha Kelly for [her post on using Fabric/Boto to deploy EC2](http://marthakelly.github.io/blog/2012/08/09/creating-an-ec2-instance-with-fabric-slash-boto/)
+
+[4]<a href id="cred_2"></a> Hat tip to garnaat for
+[his AWS recipe to setup an account with boto](https://github.com/garnaat/paws/blob/master/ec2_launch_instance.py)
+
+[5]<a href id="cred_3"></a> [More about WSGI](http://agiliq.com/blog/2013/07/basics-wsgi/)
+
+[6]<a href id="cred_4"></a> ["Building a Django App Server with Chef, Eric Holscher"](http://ericholscher.com/blog/2010/nov/8/building-django-app-server-chef/); ["An Experiment With Chef Solo", jamiecurle]("https://github.com/jamiecurle/ubuntu-django-chef-solo-config"); [Kate Heddleston's Talk on Chef at Pycon 2013](http://pyvideo.org/video/1756/chef-automating-web-application-infrastructure); [Honza's django-chef repo](https://github.com/honza/django-chef); [Noah Kantrowitz "Real World Django deployment using Chef](http://blip.tv/djangocon/real-world-django-deployment-using-chef-5572706)
+
 
 add net.core.somaxconn=1024 to /etc/sysctl.conf
 

@@ -24,6 +24,9 @@
 # WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #
 
+require 'rubygems'
+require 'json'
+
 include_recipe "git"
 include_recipe "apt"
 include_recipe "nginx"
@@ -34,6 +37,7 @@ include_recipe "build-essential"
 include_recipe "postgresql::client"
 include_recipe "postgresql::server"
 include_recipe "application"
+include_recipe "memcached"
 
 node.default["env_name"] = "#{node.app_name}-env"
 node.default["env_home"] = "#{node.project_root}/#{node.env_name}"
@@ -54,11 +58,17 @@ puts "DEFF #{node[:database]}"
 
 =begin
 execute "Update apt repos" do
-    command "apt-get update"
+   command "apt-get update"
 end
 
 
 node.base_packages.each do |pkg|
+    package pkg do
+        :upgrade
+    end
+end
+
+node.ubuntu_python_packages.each do |pkg|
     package pkg do
         :upgrade
     end
@@ -73,7 +83,7 @@ template "/home/ubuntu/.bashrc" do
   group "ubuntu"
   variables(
     :role => node.name,
-    :prompt_color => node.prompt_color)
+    :prompt_4color => node.prompt_color)
 end
 
 node.pip_python_packages.each do |pkg|
@@ -84,6 +94,32 @@ node.pip_python_packages.each do |pkg|
 end
 =end
 
+settings = Chef::EncryptedDataBagItem.load("config", "config_1")
+settings_string = "import os\n"
+settings.to_hash.each do |key, value|
+	settings_string << "os.environ['#{key}'] = '#{value}'\n"
+end
+
+# Set up nginx sites-enables and retsart on changes
+
+template "/etc/nginx/sites-enabled/#{node.app_name}" do
+  source "nginx-conf.erb"
+  owner "root"
+  group "root"
+  variables(
+    :domain => node.site_domain,
+    :app_home => "/srv/#{node.app_name}/current",
+    :env_home => "/srv/#{node.app_name}/shared/env",
+    :app_name => "#{node.app_name}"
+    )
+  notifies :restart, "service[nginx]"
+end
+
+service 'nginx' do
+  supports :restart => true, :reload => true
+  action :enable
+end
+
 application "#{node.app_name}" do
 	only_if { node['roles'].include? 'application_server' }
 	path "/srv/#{node.app_name}"
@@ -91,31 +127,35 @@ application "#{node.app_name}" do
 	group "nogroup"
 	repository "https://github.com/#{node.repo}.git"
 	revision "master"
+	symlink_before_migrate "local_settings.py"=>"#{node.app_name}/settings/local_settings.py"
 	migrate true
 
 	django do
 		requirements "requirements/requirements.txt"
 		settings_template "settings.py.erb"
 		debug true
-		collectstatic "build_static --noinput"
+		local_settings_file "local_settings.py"
+		collectstatic "collectstatic --noinput"
 		database_host "localhost"
-		database_name  "#{node.app_name}"
+		database_name  "django_db"
 		database_engine  "postgresql_psycopg2"
-		database_username  "#{node.app_name}"
+		database_username  "postgres"
 		database_password  "#{node.database_password}"
+=begin
 		database do
 			database "packaginator"
 			engine "postgresql_psycopg2"
 			username "packaginator"
 			password "awesome_password"
 		end
-		database_master_role "database_master"
+=end
+		#database_master_role "database_master"
 	end
 
 	gunicorn do
 		only_if { node['roles'].include? 'application_server' }
 		app_module :django
-		port 8080
+		bind "unix:/tmp/gunicorn_#{node.site_domain}.sock"
 	end
 
 	celery do
@@ -138,3 +178,10 @@ application "#{node.app_name}" do
 
 end
 
+file "/srv/#{node.app_name}/shared/cached-copy/project.settings" do
+    content settings_string
+    mode "440"
+    owner "ubuntu"
+    group "ubuntu"
+    action :create
+end

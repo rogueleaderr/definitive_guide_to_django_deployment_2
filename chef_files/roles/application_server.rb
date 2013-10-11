@@ -9,21 +9,25 @@ description "A node hosting a running Django/gunicorn process"
 
 default_attributes("site_domain" => "yourawsmdomain.ly",
                    "project_root" => "/home/ubuntu/sites",
-                   "app_name" =>"hello_world",
+                   "app_name" =>"deployment_example_project",
                    "repo" => "rogueleaderr/django_deployment_example_project",
                     "settings" => "__init__.py",
-                    "database_password" => "awesome_password",
+                    "database_password" => "postgres",
                     "base_packages" => "bash-completion",
                     "ubuntu_python_packages" => [
-                    "python-setuptools",
+                        "python-setuptools",
                     	"python-pip",
                     	"python-dev",
-                    	"libpq-dev"],
-                    "pip_python_packages" => "virtualenv",
+                    	"libpq-dev"
+                    ],
+                    #"pip_python_packages" => "virtualenv",
                     "postgresql" => {
                     	"password" => {
-                    		"postgres" => "iloverandompasswordsbutthiswilldo"
+                    		"postgres" => "postgres"
                     	}
+                    },
+                    "memcached" => {
+                        "listen" => "0.0.0.0"
                     }
                     )
 
