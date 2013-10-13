@@ -1,7 +1,0 @@
-{
-    "id":"config_1",
-    "POSTGRES_PASS":"postgres",
-    "POSTGRES_IP":"localhost",
-    "DEBUG":"False",
-    "PROJECT_NAME": "hello_world"
-}

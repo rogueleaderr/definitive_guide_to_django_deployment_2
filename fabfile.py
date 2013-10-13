@@ -14,6 +14,7 @@ import time
 # import configuration variables from untracked config file
 f = open("aws.cfg")
 cfg = Config(f)
+# TODO clean this up
 for k in ("aws_access_key_id", "aws_secret_access_key", "region", "key_name",
     "group_name", "ssh_port", "key_dir", "ubuntu_lts_ami"):
     globals()[k] = cfg.get(k)
@@ -215,63 +216,24 @@ def terminate_instance(name):
                 print(_yellow("Terminated"))
 
 
-@task
-def install_chef(latest=True):
-    """
-    Install chef-solo on the server.
-    """
-    local("knife solo prepare -i {key_file} {host}".format(key_file=env.key_filename,
-                                                           host=env.host_string))
-    """
-    sudo('apt-get update', pty=True)
-    sudo('apt-get install -y git-core rubygems ruby ruby-dev', pty=True)
-    sudo('apt-get install rsync', pty=True)
-    sudo('gem install ruby-shadow')
-    if latest:
-        sudo('gem install chef --no-ri --no-rdoc', pty=True)
-    else:
-        sudo('gem install chef --no-ri --no-rdoc --version {0}'.format(CHEF_VERSION), pty=True)
-
-    with settings(hide('warnings', 'stdout', 'stderr'), warn_only=True):
-        sudo('mkdir /etc/chef')
-    """
-
 
 @task
-def up():
+def bootstrap(name, no_install=False):
     """
-    Provision with Chef 11 instead of the default.
+    Bootstrap the specified server. Install chef then run chef solo.
 
-    1.  Bring up VM without provisioning
-    2.  Remove all Chef and Moneta
-    3.  Install latest Chef
-    4.  Reload VM to recreate shared folders
-    5.  Provision
+    :param name: The name of the node to be bootstrapped
+    :param no_install: Optionally skip the Chef installation
+    since it takes time and is unneccesary after the first run
+    :return:
     """
-    local('vagrant up --no-provision')
 
-    set_env_for_user('vagrant')
-
-    sudo('gem uninstall --no-all --no-executables --no-ignore-dependencies chef moneta')
-    install_chef(latest=False)
-    local('vagrant reload')
-    local('vagrant provision')
-
-
-@task
-def bootstrap(name):
+    print(_green("--BOOTSTRAPPING {}--".format(name)))
     f = open("fab_hosts/{}.txt".format(name))
     env.host_string = "ubuntu@{}".format(f.readline().strip())
-    print env.hosts
-    install_chef()
+    if not no_install:
+        install_chef()
     run_chef(name)
-
-@task
-def hello():
-    print("Hello world!")
-    a = local("echo hello").stdout
-    print "zoinks"
-    print a
 
 @task
 def push():
@@ -314,7 +276,6 @@ def push():
 
 @task
 def deploy():
-    set_env_for_user(env.user)
 
     push()
     sudo('chmod -R 0770 %s' % env.virtualenv)
@@ -339,52 +300,6 @@ def restart():
         sudo('/etc/init.d/nginx reload')
 
 
-@task
-def vagrant(username):
-    # set ssh key file for vagrant
-    result = local('vagrant ssh-config', capture=True)
-    data = parse_ssh_config(result)
-
-    env.remote = 'vagrant'
-    env.branch = 'master'
-    env.host = '127.0.0.1'
-    env.port = data['Port']
-
-    try:
-        env.host_string = '%s@127.0.0.1:%s' % (username, data['Port'])
-    except KeyError:
-        raise Exception("Missing data from ssh-config")
-
-
-@task
-def staging(username):
-    env.remote = 'staging'
-    env.branch = 'master'
-    env.host = STAGING_HOST
-    env.port = 22
-    env.host_string = '%s@%s:%s' % (username, env.host, env.port)
-
-
-
-@task
-def provision():
-    """
-    Run chef-solo
-    """
-    sync_config()
-
-    node_name = "node_%s.json" % (env.roles[0].split('_')[0])
-
-    with cd('/etc/chef/cookbooks'):
-        sudo('chef-solo -c /etc/chef/cookbooks/solo.rb -j /etc/chef/cookbooks/%s' % node_name, pty=True)
-
-
-@task
-def prepare():
-    install_chef(latest=False)
-    provision()
-
-
 #----------HELPER FUNCTIONS-----------
 
 @contextmanager
@@ -392,10 +307,6 @@ def _virtualenv():
     with prefix(env.activate):
         yield
 
-
-def _manage_py(command):
-    run('python manage.py %s --settings=example.settings_server'
-            % command)
 
 def connect_to_ec2():
     """
@@ -406,105 +317,26 @@ def connect_to_ec2():
     aws_secret_access_key=aws_secret_access_key)
 
 
-def parse_ssh_config(text):
+def install_chef():
     """
-    Parse an ssh-config output into a Python dict.
-
-    Because Windows doesn't have grep, lol.
+    Install chef-solo on the server.
     """
-    try:
-        lines = text.split('\n')
-        lists = [l.split(' ') for l in lines]
-        lists = [filter(None, l) for l in lists]
+    print(_yellow("--INSTALLING CHEF--"))
+    local("knife solo prepare -i {key_file} {host}".format(key_file=env.key_filename,
+                                                           host=env.host_string))
 
-        tuples = [(l[0], ''.join(l[1:]).strip().strip('\r')) for l in lists]
-
-        return dict(tuples)
-
-    except IndexError:
-        raise Exception("Malformed input")
-
-
-def set_env_for_user(user='example'):
-    if user == 'vagrant':
-        # set ssh key file for vagrant
-        result = local('vagrant ssh-config', capture=True)
-        data = parse_ssh_config(result)
-
-        try:
-            env.host_string = 'vagrant@127.0.0.1:%s' % data['Port']
-            env.key_filename = data['IdentityFile'].strip('"')
-        except KeyError:
-            raise Exception("Missing data from ssh-config")
-
-
-def upload_project_sudo(local_dir=None, remote_dir=""):
-    """
-    Tars and compresses files on local host and transfers
-    them to remote host at specified location
-    """
-    local_dir = local_dir or os.getcwd()
-
-    # Remove final '/' in local_dir so that basename() works
-    local_dir = local_dir.rstrip(os.sep)
-
-    local_path, local_name = os.path.split(local_dir)
-    tar_file = "%s.tar.gz" % local_name
-    target_tar = os.path.join(remote_dir, tar_file)
-    tmp_folder = mkdtemp()
-
-    try:
-        tar_path = os.path.join(tmp_folder, tar_file)
-        local("tar -czf %s -C %s %s" % (tar_path, local_path, local_name))
-        put(tar_path, target_tar, use_sudo=True)
-        with cd(remote_dir):
-            try:
-                sudo("tar -xzf %s" % tar_file)
-            finally:
-                sudo("rm -f %s" % tar_file)
-    finally:
-        local("rm -rf %s" % tmp_folder)
-
-def sync_config():
-    """
-    Download the latest versions of the chef cookbooks that we're going to need.
-
-    Make sure the chef config directory exists, then upload cookbooks and the
-    solo.rb file that tells chef where to look for cookbooks.
-
-    TODO: Use rsync to avoid blowing out config. I was having ssh/permission
-    issues when I tried
-    """
-    """
-    if raw_input("Chef requires a clean git repo to download new cookbooks. Commit your latest changes now? (y/n)").lower() == "y":
-        local("git commit -am 'commiting to allow download of updated cookbooks'")
-        node_data = open("chef_files/cookbooks/node.json")
-        data = json.load(node_data)
-        node_data.close()
-        for pkg in data["run_list"]:
-            if pkg != "django_deployment":
-                with settings(warn_only=True):
-                    local("knife cookbook site install {} -o chef_files/cookbooks".format(pkg))
-    """
-    """
-    sudo('mkdir -p /etc/chef')
-    # TODO glob this
-    remote_chef_dir = '/etc/chef'
-    upload_project_sudo(local_dir='./chef_files/cookbooks', remote_dir=remote_chef_dir)
-    upload_project_sudo(local_dir='./chef_files/site-cookbooks', remote_dir=remote_chef_dir)
-    upload_project_sudo(local_dir='./chef_files/json_attribs', remote_dir=remote_chef_dir)
-    upload_project_sudo(local_dir='./chef_files/solo_webserver.rb', remote_dir=remote_chef_dir)
-    upload_project_sudo(local_dir='./chef_files/roles', remote_dir=remote_chef_dir)
-    # TODO do via databags
-    upload_project_sudo(local_dir='./project.settings', remote_dir=remote_chef_dir)
-    """
 
 def run_chef(name):
-    print(_yellow("--SYNCING CHEF CONFIG--"))
-    sync_config()
+    """
+    Read configuration from the appropriate node file and bootstrap
+    the node
+
+    :param name:
+    :return:
+    """
     print(_yellow("--RUNNING CHEF--"))
     node = "./nodes/{name}_node.json".format(name=name)
     with lcd('chef_files'):
-        local("knife solo cook -i {key_file} {host} {node}".format(keygca_file=env.key_filename,
+        local("knife solo cook -i {key_file} {host} {node}".format(key_file=env.key_filename,
                                                            host=env.host_string,
                                                            node=node))

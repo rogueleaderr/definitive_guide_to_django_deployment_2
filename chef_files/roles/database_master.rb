@@ -1,8 +1,20 @@
-name "packaginator_database_master"
-description "Database master for the packaginator application."
-run_list(
-  "recipe[postgresql::server]",
-  "recipe[packaginator::database]"
+name "database_master"
+description "Database master cluster"
+
+settings = Chef::EncryptedDataBagItem.load("config", "config_1")
+postgres_pass = settings["POSTGRES_PASS"]
+db_name = settings["DATABASE_NAME"]
+
+default_attributes(
+	:postgresql => {
+		:listen => '*',
+		:config_pgtune => {:db_type => "web"},
+		:password => {"postgres" => postgres_pass},
+		:db_name => db_name
+		}
 )
 
-override_attributes :postgresql => {:listen => '*'}
+run_list(
+  "recipe[django_application_server::database]"
+)
+

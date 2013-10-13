@@ -6,25 +6,36 @@ description "A node hosting a running Django/gunicorn process"
 # `repo` is the github repo, assumed to be public, cloned into `env_root`/`app_name`-env/`app_name`
 # `settings` is the settings file, assumed to be in settings/ at your repo's root
 
+settings = Chef::EncryptedDataBagItem.load("config", "config_1")
+postgres_pass = settings["POSTGRES_PASS"]
+domain = settings["DOMAIN"]
+app_name = settings["APP_NAME"]
+repo = settings["REPO"]
+github_user = settings["GITHUB_USER"]
+database_ip = settings["DATABASE_IP"]
+database_name = settings["DATABASE_NAME"]
 
-default_attributes("site_domain" => "yourawsmdomain.ly",
+default_attributes("site_domain" => domain,
                    "project_root" => "/home/ubuntu/sites",
-                   "app_name" =>"deployment_example_project",
-                   "repo" => "rogueleaderr/django_deployment_example_project",
-                    "settings" => "__init__.py",
-                    "database_password" => "postgres",
-                    "base_packages" => "bash-completion",
-                    "ubuntu_python_packages" => [
+                   "app_name" => app_name,
+                   "repo" => "#{github_user}/#{repo}",
+#                   "settings" => "__init__.py",
+                    "ubuntu_packages" => [
+                        "bash-completion",
                         "python-setuptools",
-                    	"python-pip",
-                    	"python-dev",
-                    	"libpq-dev"
+                        "python-pip",
+                        "python-dev",
+                        "libpq-dev"
                     ],
-                    #"pip_python_packages" => "virtualenv",
+                    "pip_python_packages" => [
+                        "virtualenv",
+                    ],
                     "postgresql" => {
                     	"password" => {
-                    		"postgres" => "postgres"
-                    	}
+                    		"postgres" => postgres_pass
+                    	},
+                        "database_ip" => database_ip,
+                        "database_name" => database_name,
                     },
                     "memcached" => {
                         "listen" => "0.0.0.0"

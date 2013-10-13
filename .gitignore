@@ -16,5 +16,6 @@ chef_files/hold_cookbooks/*
 chef_files/data_bag_key
 venv
 hold_chef_files/*
+settings.json
 *.lock
 .#*

@@ -35,7 +35,6 @@ include_recipe "nginx"
 include_recipe "rabbitmq"
 include_recipe "build-essential"
 include_recipe "postgresql::client"
-include_recipe "postgresql::server"
 include_recipe "application"
 include_recipe "memcached"
 
@@ -44,6 +43,7 @@ node.default["env_home"] = "#{node.project_root}/#{node.env_name}"
 node.default["app_home"] = "#{node.project_root}/#{node.app_name}"
 
 # a ridiculously roundabout way of getting the node variable into the block
+=begin
 db_line = <<HERE
 			database  "#{node.app_name}"
 			engine  "postgresql_psycopg2"
@@ -55,25 +55,17 @@ proc_line = "Proc.new { '#{db_line}' }"
 puts "PROcc #{proc_line}"
 node.default[:database] = eval "Proc.new { puts 7777777 }"
 puts "DEFF #{node[:database]}"
+=end
 
-=begin
 execute "Update apt repos" do
    command "apt-get update"
 end
 
-
-node.base_packages.each do |pkg|
+node.ubuntu_packages.each do |pkg|
     package pkg do
         :upgrade
     end
 end
-
-node.ubuntu_python_packages.each do |pkg|
-    package pkg do
-        :upgrade
-    end
-end
-
 
 # setup a nice bash shell configuration
 template "/home/ubuntu/.bashrc" do
@@ -92,7 +84,7 @@ node.pip_python_packages.each do |pkg|
         not_if "[ `pip freeze | grep #{pkg} ]"
     end
 end
-=end
+
 
 settings = Chef::EncryptedDataBagItem.load("config", "config_1")
 settings_string = "import os\n"
@@ -100,9 +92,11 @@ settings.to_hash.each do |key, value|
 	settings_string << "os.environ['#{key}'] = '#{value}'\n"
 end
 
-# Set up nginx sites-enables and retsart on changes
 
-template "/etc/nginx/sites-enabled/#{node.app_name}" do
+# Set up nginx sites-enabled and restart on changes
+
+puts "PTTG #{node.site_domain}"
+template "/etc/nginx/sites-available/#{node.app_name}.conf" do
   source "nginx-conf.erb"
   owner "root"
   group "root"
@@ -115,10 +109,18 @@ template "/etc/nginx/sites-enabled/#{node.app_name}" do
   notifies :restart, "service[nginx]"
 end
 
+nginx_site "default" do
+    enable false
+end
+
+nginx_site "#{node.app_name}.conf"
+
 service 'nginx' do
   supports :restart => true, :reload => true
   action :enable
 end
+
+# deploy the django application and configure celery and gunicorn
 
 application "#{node.app_name}" do
 	only_if { node['roles'].include? 'application_server' }
@@ -136,11 +138,11 @@ application "#{node.app_name}" do
 		debug true
 		local_settings_file "local_settings.py"
 		collectstatic "collectstatic --noinput"
-		database_host "localhost"
-		database_name  "django_db"
+		database_host   node["postgresql"]["database_ip"]
+		database_name   node["postgresql"]["database_name"]
 		database_engine  "postgresql_psycopg2"
 		database_username  "postgres"
-		database_password  "#{node.database_password}"
+		database_password  node["postgresql"]["password"]["postgres"]
 =begin
 		database do
 			database "packaginator"

@@ -351,13 +351,14 @@ Now we can use the knife-solo to create an encrypted data bag:
     cd ..
 
 
-Make sure to add "staticfiles" to your installed apps.
+Make sure to add "gunicorn" to your installed apps.
 
 
 
 
 
-port 80    
+
+open port 80 to world and 5432 to hello_world_group
 
 http://berkshelf.com/
 
